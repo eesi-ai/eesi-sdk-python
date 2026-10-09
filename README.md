@@ -5,9 +5,11 @@ a persona, a voice, tools, live state from your game or app, and long memory of
 every player. Plus a typed client for the rest of the EESI API.
 
 ```bash
-pip install "eesi-sdk[audio]"     # the audio extra adds this computer's microphone and speaker
+pip install "eesi-sdk[audio] @ git+https://github.com/eesi-ai/eesi-sdk-python"
 export EESI_API_KEY=sk-eesi-...
 ```
+
+See [Install](#install) for uv, requirements files, pinning and servers.
 
 ```python
 import asyncio
@@ -26,6 +28,34 @@ asyncio.run(kael.start())   # talk through your microphone until Ctrl+C
 ```
 
 Or without code: `python -m eesi talk --name Luna --preset companion --persona "A curious companion."`
+
+## Install
+
+Python 3.10 or later.
+
+```bash
+pip install "eesi-sdk[audio] @ git+https://github.com/eesi-ai/eesi-sdk-python"
+```
+
+| With | Command |
+| --- | --- |
+| uv | `uv add "eesi-sdk[audio] @ git+https://github.com/eesi-ai/eesi-sdk-python"` |
+| Poetry | `poetry add "git+https://github.com/eesi-ai/eesi-sdk-python" --extras audio` |
+| requirements.txt | `eesi-sdk[audio] @ git+https://github.com/eesi-ai/eesi-sdk-python` |
+| A fixed version | `pip install "eesi-sdk[audio] @ git+https://github.com/eesi-ai/eesi-sdk-python@<commit>"` |
+
+- The `audio` extra adds this computer's microphone and speaker (`numpy`,
+  `sounddevice`). Leave it out on a server, which streams audio another way.
+  On Linux, `sounddevice` needs PortAudio: `sudo apt install libportaudio2`.
+- Your API key: create one on the API keys page of the
+  [EESI console](https://platform.eesi.ai), then `export EESI_API_KEY=sk-eesi-...`
+  (or pass `NurClient(api_key=...)`). Keep it on machines you control; give
+  browsers and game clients a client secret instead.
+- Check it works: `python -m eesi chat --name Kael --preset npc --persona "An elven merchant."`
+
+Both imports come from this one package: `from eesi import NurClient` (the
+characters) and `from eesi import EESIClient` (the REST API). The PyPI release
+(`pip install "eesi-sdk[audio]"`) is on the way; the code is the same.
 
 ## What you get
 
