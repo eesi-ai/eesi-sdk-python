@@ -1,0 +1,5 @@
+dist/
+build/
+*.egg-info/
+# Local character memory written by examples and the quick start.
+.eesi/

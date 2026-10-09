@@ -1,0 +1,21 @@
+# Publishes to PyPI when a version tag is pushed (v0.3.0), with PyPI trusted
+# publishing: no token in the repository. Configure the trusted publisher for
+# eesi-sdk on pypi.org (this repository, workflow release.yml, environment pypi).
+name: Release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: The tag matches the package version
+        run: test "v$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1

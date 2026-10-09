@@ -1,0 +1,59 @@
+[project]
+name = "eesi-sdk"
+version = "0.3.0"
+description = "EESI for Python: Nur Live characters with voice, memory, live context and tools, plus the typed REST client"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-2-Clause" }
+authors = [
+    { name = "Zansat Technologies Private Limited", email = "contact@eesi.ai" },
+]
+keywords = ["eesi", "voice-ai", "speech", "sdk", "api", "realtime", "npc", "voice-agent", "companion", "speech-to-speech"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "httpx>=0.27,<1",
+    "pydantic>=2.0,<3",
+    "websockets>=13,<17",
+]
+
+[project.optional-dependencies]
+# This computer's microphone and speaker (`nur.audio.local()`, `python -m eesi talk`).
+audio = [
+    "numpy>=1.26",
+    "sounddevice>=0.5",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+eesi = "eesi.__main__:main"
+
+[project.urls]
+Homepage = "https://eesi.ai"
+Documentation = "https://docs.eesi.ai/realtime/characters"
+Repository = "https://github.com/eesi-ai/eesi-sdk-python"
+Issues = "https://github.com/eesi-ai/eesi-sdk-python/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eesi_sdk", "src/eesi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Run from sdk/python without installing the package: `python -m pytest tests`.
+pythonpath = ["src"]
