@@ -32,7 +32,14 @@ from .memory import InMemoryStore, LocalMemoryStore, Memory, MemoryPolicy
 
 log = logging.getLogger("eesi")
 
-__all__ = ["ClientSecret", "NurClient", "Voice", "VoiceDesign"]
+__all__ = [
+    "ClientSecret",
+    "NurClient",
+    "Voice",
+    "VoiceDesign",
+    "WebhookVerificationError",
+    "verify_webhook",
+]
 
 DEFAULT_BASE_URL = "https://api.eesi.ai"
 DEFAULT_MODEL = "nur-live-v1"
@@ -488,6 +495,13 @@ class NurClient:
         control: bool | str = False,
         language: str | None = None,
         players: Any = None,
+        max_duration: int | None = None,
+        silence_hangup: int | None = None,
+        webhook_url: str | None = None,
+        webhook_secret: str | None = None,
+        metadata: dict[str, str] | None = None,
+        train: bool = True,
+        record: bool = True,
     ) -> ClientSecret:
         """A credential that opens a session already configured as *character* for one player.
 
@@ -510,6 +524,15 @@ class NurClient:
         state, tools, cues, memory) while the client only plays and records
         audio. Tool calls are then your server's to answer; pass
         ``control="client"`` to leave them to the client.
+
+        Beyond the client, too: ``max_duration`` (seconds) ends the call and
+        ``silence_hangup`` (seconds) hangs up when nobody speaks, types or is
+        answered for that long, both with ``eesi.hangup``. ``webhook_url`` and
+        ``webhook_secret`` post each reply and the session's end to your
+        server, signed (check it with :func:`eesi.verify_webhook`), tagged with
+        ``metadata``. ``train=False`` keeps the session out of any training,
+        evaluation or improvement of a model; ``record=False`` keeps no
+        recording or transcript after it.
         """
         from .session import Session
 
@@ -543,6 +566,26 @@ class NurClient:
             if tools not in ("server", "client"):
                 raise ConfigurationError('control is True, "server" or "client".')
             body["eesi_control"] = {"tools": tools}
+        limits = {
+            key: int(value)
+            for key, value in (
+                ("max_duration_seconds", max_duration),
+                ("silence_hangup_seconds", silence_hangup),
+            )
+            if value is not None
+        }
+        if limits:
+            body["eesi_limits"] = limits
+        if webhook_url or webhook_secret:
+            if not (webhook_url and webhook_secret):
+                raise ConfigurationError(
+                    "A webhook needs both webhook_url and webhook_secret."
+                )
+            body["eesi_webhook"] = {"url": webhook_url, "secret": webhook_secret}
+        if metadata:
+            body["eesi_metadata"] = {str(k): str(v) for k, v in metadata.items()}
+        if not train or not record:
+            body["eesi_data"] = {"train": bool(train), "record": bool(record)}
         try:
             data = (
                 await self._request("POST", "/realtime/client_secrets", json=body)
@@ -578,6 +621,10 @@ class NurClient:
         proactive = character.proactive
         join = {
             "url": url,
+            # The same one-use secret, for a WebRTC client: POST its SDP offer
+            # to callsUrl with "Authorization: Bearer <token>".
+            "token": value,
+            "callsUrl": f"{self.base_url}/v1/realtime/calls",
             "expiresAt": expires_at,
             "character": character.name,
             "model": character.model,
@@ -636,3 +683,52 @@ def _local_timezone() -> str | None:
         return None
     marker = "zoneinfo/"
     return link.split(marker, 1)[1] if marker in link else None
+
+
+class WebhookVerificationError(EESIError):
+    """A webhook whose signature or timestamp does not check out."""
+
+
+def verify_webhook(
+    body: bytes | str,
+    headers: Any,
+    secret: str,
+    *,
+    tolerance: float = 300.0,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Check one webhook post from a client secret's session and return its event.
+
+    *body* is the raw request body, exactly as received; *headers* any mapping
+    of the request's headers. Raises :class:`WebhookVerificationError` when the
+    ``EESI-Signature`` does not match or the post is older than *tolerance*
+    seconds (a replay).
+    """
+    import hashlib
+    import hmac
+    import json
+
+    raw = body.encode() if isinstance(body, str) else bytes(body)
+    lowered = {str(k).lower(): str(v) for k, v in dict(headers).items()}
+    webhook_id = lowered.get("eesi-webhook-id", "")
+    stamp = lowered.get("eesi-webhook-timestamp", "")
+    signature = lowered.get("eesi-signature", "")
+    try:
+        timestamp = int(stamp)
+    except ValueError:
+        raise WebhookVerificationError("The webhook has no valid timestamp.") from None
+    current = time.time() if now is None else now
+    if abs(current - timestamp) > tolerance:
+        raise WebhookVerificationError("The webhook is too old (or from the future).")
+    expected = hmac.new(
+        secret.encode(), f"{webhook_id}.{timestamp}.".encode() + raw, hashlib.sha256
+    ).hexdigest()
+    given = [
+        part[3:] for part in signature.split(",") if part.strip().startswith("v1=")
+    ]
+    if not any(hmac.compare_digest(expected, candidate.strip()) for candidate in given):
+        raise WebhookVerificationError("The webhook signature does not match.")
+    event = json.loads(raw)
+    if not isinstance(event, dict) or event.get("id") != webhook_id:
+        raise WebhookVerificationError("The webhook body does not match its id.")
+    return event

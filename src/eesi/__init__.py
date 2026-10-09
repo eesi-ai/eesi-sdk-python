@@ -34,7 +34,14 @@ from . import events
 from ._version import __version__
 from .audio import LocalAudio, WavInput, WavOutput
 from .character import Character
-from .client import ClientSecret, NurClient, Voice, VoiceDesign
+from .client import (
+    ClientSecret,
+    NurClient,
+    Voice,
+    VoiceDesign,
+    WebhookVerificationError,
+    verify_webhook,
+)
 from .context import LiveContext
 from .errors import (
     ApiError,
@@ -111,8 +118,10 @@ __all__ = [
     "VoiceDesign",
     "WavInput",
     "WavOutput",
+    "WebhookVerificationError",
     "__version__",
     "describe_language",
     "events",
     "tool",
+    "verify_webhook",
 ]

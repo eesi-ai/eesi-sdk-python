@@ -402,3 +402,80 @@ async def test_a_room_mixes_players_and_knows_who_spoke(api):
             in cue["response"]["input"][0]["content"][0]["text"]
         )
         assert len(appends) >= 20, "the mixer keeps sending 20 ms frames"
+
+
+# ── what a studio puts on the ticket ────────────────────────────────────
+
+
+@run_async
+async def test_a_secret_carries_limits_a_webhook_tags_and_data_use(api):
+    async with FakeGateway() as gateway:
+        nur = client(gateway, api)
+        guard = nur.npc(name="Guard")
+        minted = await guard.client_secret(
+            "p-123",
+            lock="all",
+            max_duration=600,
+            silence_hangup=45,
+            webhook_url="https://hooks.neotopia.example/nur",
+            webhook_secret="s" * 32,
+            metadata={"npc": "guard-7"},
+            train=False,
+            record=False,
+        )
+        body = api.secrets[-1]
+        assert body["eesi_limits"] == {
+            "max_duration_seconds": 600,
+            "silence_hangup_seconds": 45,
+        }
+        assert body["eesi_webhook"] == {
+            "url": "https://hooks.neotopia.example/nur",
+            "secret": "s" * 32,
+        }
+        assert body["eesi_metadata"] == {"npc": "guard-7"}
+        assert body["eesi_data"] == {"train": False, "record": False}
+        # A WebRTC client gets the same one-use secret and where to post its offer.
+        assert minted.join["token"] == minted.value
+        assert minted.join["callsUrl"].endswith("/v1/realtime/calls")
+        assert "s" * 32 not in str(minted.join)
+
+
+@run_async
+async def test_a_default_secret_sends_none_of_them(api):
+    async with FakeGateway() as gateway:
+        await client(gateway, api).npc(name="Guard").client_secret("p-1")
+        body = api.secrets[-1]
+        assert not {"eesi_limits", "eesi_webhook", "eesi_metadata", "eesi_data"} & set(
+            body
+        )
+
+
+def test_a_webhook_is_verified_against_its_signature_and_age():
+    import hashlib
+    import hmac
+    import json
+
+    import pytest
+
+    from eesi import WebhookVerificationError, verify_webhook
+
+    body = json.dumps({"id": "whk_1", "type": "response.completed"}).encode()
+    signature = hmac.new(
+        b"s" * 32, b"whk_1.1760000000." + body, hashlib.sha256
+    ).hexdigest()
+    headers = {
+        "EESI-Webhook-Id": "whk_1",
+        "EESI-Webhook-Timestamp": "1760000000",
+        "EESI-Signature": f"v1={signature}",
+    }
+
+    assert (
+        verify_webhook(body, headers, "s" * 32, now=1760000030)["type"]
+        == "response.completed"
+    )
+    with pytest.raises(WebhookVerificationError):
+        verify_webhook(body + b" ", headers, "s" * 32, now=1760000030)
+    with pytest.raises(WebhookVerificationError):
+        verify_webhook(body, headers, "t" * 32, now=1760000030)
+    with pytest.raises(WebhookVerificationError):
+        verify_webhook(body, headers, "s" * 32, now=1760001000)

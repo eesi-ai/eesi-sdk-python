@@ -163,9 +163,41 @@ class ClientSecretControl(BaseModel):
     tools: Annotated[Tools | None, Field(title="Tools")] = Tools.server
 
 
+class ClientSecretData(BaseModel):
+    """
+    What the session's audio and words may be used for.
+
+    Either can only narrow what the organization's own settings allow.
+    """
+
+    train: Annotated[bool | None, Field(title="Train")] = True
+    record: Annotated[bool | None, Field(title="Record")] = True
+
+
 class ClientSecretExpiry(BaseModel):
     anchor: Annotated[Literal["created_at"], Field(title="Anchor")] = "created_at"
     seconds: Annotated[int | None, Field(ge=10, le=600, title="Seconds")] = 60
+
+
+class MaxDurationSeconds(RootModel[int]):
+    root: Annotated[int, Field(ge=10, le=10800, title="Max Duration Seconds")]
+
+
+class SilenceHangupSeconds(RootModel[int]):
+    root: Annotated[int, Field(ge=5, le=3600, title="Silence Hangup Seconds")]
+
+
+class ClientSecretLimits(BaseModel):
+    """
+    How long the session may last; the client cannot change either.
+    """
+
+    max_duration_seconds: Annotated[
+        MaxDurationSeconds | None, Field(title="Max Duration Seconds")
+    ] = None
+    silence_hangup_seconds: Annotated[
+        SilenceHangupSeconds | None, Field(title="Silence Hangup Seconds")
+    ] = None
 
 
 class EesiLockEnum(Enum):
@@ -175,37 +207,6 @@ class EesiLockEnum(Enum):
     turn_detection = "turn_detection"
     context = "context"
     conversation = "conversation"
-
-
-class ClientSecretRequest(BaseModel):
-    """
-    A session fixed now and opened later by a client that holds no key.
-
-    The OpenAI shape (``session``, ``expires_after``) plus two EESI fields:
-    ``eesi_context``, the live-state blocks the session starts with, as
-    ``eesi.context.update`` would set them; and ``eesi_lock``, what the client
-    may not change.
-    """
-
-    session: Annotated[dict[str, Any], Field(title="Session")]
-    """
-    A session.update body: instructions, audio, tools, ...
-    """
-    expires_after: ClientSecretExpiry | None = None
-    eesi_context: Annotated[dict[str, str] | None, Field(title="Eesi Context")] = None
-    """
-    Live-state blocks by key, with the limits of eesi.context.update.
-    """
-    eesi_control: ClientSecretControl | None = None
-    """
-    Open a server control channel with the session: your server joins at /v1/realtime/control/{id}, sees its events and acts in it.
-    """
-    eesi_lock: Annotated[
-        list[EesiLockEnum] | Literal["all"] | None, Field(title="Eesi Lock")
-    ] = None
-    """
-    What the client may not change: instructions, tools, voice, turn_detection, context, conversation, or all. Defaults to instructions and tools.
-    """
 
 
 class ClientSecretResponse(BaseModel):
@@ -218,6 +219,22 @@ class ClientSecretResponse(BaseModel):
     session: Annotated[dict[str, Any], Field(title="Session")]
     eesi_lock: Annotated[list[str], Field(title="Eesi Lock")]
     eesi_control: Annotated[dict[str, str] | None, Field(title="Eesi Control")] = None
+    eesi_limits: Annotated[dict[str, int] | None, Field(title="Eesi Limits")] = None
+    eesi_webhook: Annotated[dict[str, str] | None, Field(title="Eesi Webhook")] = None
+    eesi_metadata: Annotated[dict[str, str] | None, Field(title="Eesi Metadata")] = None
+    eesi_data: Annotated[dict[str, bool] | None, Field(title="Eesi Data")] = None
+
+
+class ClientSecretWebhook(BaseModel):
+    """
+    Post each reply of the session, and its end, to your server, signed.
+    """
+
+    url: Annotated[str, Field(max_length=2048, title="Url")]
+    """
+    Public https URL.
+    """
+    secret: Annotated[str, Field(max_length=256, min_length=16, title="Secret")]
 
 
 class CreditLedgerEntryResponse(BaseModel):
@@ -680,6 +697,53 @@ class BillingCreditsResponse(BaseModel):
     voice_clone_credits: Annotated[int | None, Field(title="Voice Clone Credits")] = 0
     free_tier: FreeTierResponse | None = None
     sandbox: Annotated[bool | None, Field(title="Sandbox")] = False
+
+
+class ClientSecretRequest(BaseModel):
+    """
+    A session fixed now and opened later by a client that holds no key.
+
+    The OpenAI shape (``session``, ``expires_after``) plus two EESI fields:
+    ``eesi_context``, the live-state blocks the session starts with, as
+    ``eesi.context.update`` would set them; and ``eesi_lock``, what the client
+    may not change.
+    """
+
+    session: Annotated[dict[str, Any], Field(title="Session")]
+    """
+    A session.update body: instructions, audio, tools, ...
+    """
+    expires_after: ClientSecretExpiry | None = None
+    eesi_context: Annotated[dict[str, str] | None, Field(title="Eesi Context")] = None
+    """
+    Live-state blocks by key, with the limits of eesi.context.update.
+    """
+    eesi_control: ClientSecretControl | None = None
+    """
+    Open a server control channel with the session: your server joins at /v1/realtime/control/{id}, sees its events and acts in it.
+    """
+    eesi_lock: Annotated[
+        list[EesiLockEnum] | Literal["all"] | None, Field(title="Eesi Lock")
+    ] = None
+    """
+    What the client may not change: instructions, tools, voice, turn_detection, context, conversation, or all. Defaults to instructions and tools.
+    """
+    eesi_limits: ClientSecretLimits | None = None
+    """
+    A maximum call length and a silence hang-up, beyond the client.
+    """
+    eesi_webhook: ClientSecretWebhook | None = None
+    """
+    Post each reply and the session's end to your server, signed.
+    """
+    eesi_metadata: Annotated[dict[str, str] | None, Field(title="Eesi Metadata")] = None
+    """
+    Your own tags (at most 16), echoed in every webhook.
+    """
+    eesi_data: ClientSecretData | None = None
+    """
+    Keep the session out of training, or out of storage.
+    """
 
 
 class DailyUsageBreakdownResponse(BaseModel):
