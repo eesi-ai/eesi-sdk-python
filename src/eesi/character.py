@@ -285,6 +285,46 @@ class Character:
                 await session.refresh_memory()
         return record
 
+    async def learn_from_session(
+        self,
+        event: dict[str, Any],
+        *,
+        player_id: str,
+        player_name: str | None = None,
+    ) -> tuple[list[Any], list[Any], list[str]]:
+        """Learn from a call a player's client opened with a client secret.
+
+        *event* is the ``session.ended`` webhook, verified with
+        :func:`eesi.verify_webhook`; its transcript is what the player and
+        the character said. What was worth keeping becomes this player's
+        memories (under the memory policy's ``rules``), and their next client
+        secret starts with it. Returns (added, superseded, forgotten ids).
+        """
+        if self.memory is None:
+            raise ConfigurationError(
+                f"{self.name} has no memory. Create it with memory=True or memory=nur.memory.local(...)."
+            )
+        transcript = (
+            event.get("transcript") if event.get("type") == "session.ended" else None
+        )
+        if not isinstance(transcript, list) or not transcript:
+            return [], [], []
+        lines = [
+            (
+                "player" if line.get("role") == "player" else self.name,
+                str(line.get("text") or ""),
+            )
+            for line in transcript
+            if isinstance(line, dict)
+        ]
+        return await self.memory.learn(
+            lines,
+            player_id=player_id,
+            player_name=player_name,
+            session_id=str(event.get("session_id") or "") or None,
+            skip_kinds=() if self.personalize else ("preference",),
+        )
+
     # ── instructions ─────────────────────────────────────────────────────
 
     def instructions_text(self, *, language: str | None = None) -> str:

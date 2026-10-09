@@ -835,3 +835,80 @@ def test_instructions_compose_persona_rules_and_spoken_style(tmp_path):
     assert "What you want:\n- Help them keep their running habit." in text
     assert "no lists, markdown" in text
     assert luna.memory is not None, "a companion remembers by default"
+
+
+# ── a game's own memory rules, and learning from a webhook ──────────────
+
+
+@run_async
+async def test_memory_rules_are_the_last_word_in_the_extraction_prompt():
+    from eesi.memory.extraction import ExtractionRequest, LLMExtractor
+
+    seen: list[list[dict]] = []
+
+    async def chat(messages):
+        seen.append(messages)
+        return '{"summary": "", "memories": [], "forget": []}'
+
+    request = ExtractionRequest(
+        character_name="Sage",
+        player_id="p1",
+        player_name=None,
+        transcript=[("player", "I'm building a treehouse.")],
+        existing=[],
+    )
+    await LLMExtractor(chat, rules="Only game facts. Never age, school or location.")(
+        request
+    )
+    await LLMExtractor(chat)(request)
+
+    assert seen[0][0]["content"].endswith(
+        "\n\nWhat Sage may remember, set by the game, which wins over the rules above "
+        "where they differ:\nOnly game facts. Never age, school or location."
+    )
+    assert "set by the game" not in seen[1][0]["content"]
+
+
+@run_async
+async def test_a_finished_call_is_learned_from_its_webhook():
+    seen: list = []
+
+    async def extractor(request):
+        seen.append(request)
+        return ExtractionResult(
+            summary="Talked about a treehouse.",
+            memories=(
+                MemoryCandidate(
+                    text="They are building a treehouse.", kind="fact", importance=0.6
+                ),
+            ),
+        )
+
+    nur = NurClient(api_key="sk-eesi-test", base_url="http://127.0.0.1:9")
+    sage = nur.npc(
+        name="Sage",
+        memory=Memory(InMemoryStore(), policy=MemoryPolicy(extractor=extractor)),
+    )
+    event = {
+        "type": "session.ended",
+        "session_id": "conv_1",
+        "transcript": [
+            {"role": "player", "text": "I'm building a treehouse."},
+            {"role": "character", "text": "Use oak for the floor."},
+        ],
+    }
+
+    added, _, _ = await sage.learn_from_session(event, player_id="p-123")
+
+    assert list(seen[0].transcript) == [
+        ("player", "I'm building a treehouse."),
+        ("Sage", "Use oak for the floor."),
+    ]
+    assert {record.text for record in added} == {
+        "They are building a treehouse.",
+        "Talked about a treehouse.",
+    }
+    assert all(record.player_id == "p-123" for record in added)
+    assert await sage.learn_from_session(
+        {"type": "response.completed"}, player_id="p-123"
+    ) == ([], [], [])

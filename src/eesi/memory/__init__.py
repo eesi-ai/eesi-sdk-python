@@ -103,6 +103,9 @@ class MemoryPolicy:
     weights: RecallWeights = field(default_factory=RecallWeights)
     #: Your own extraction model; the default asks nur-llm-v1 with your key.
     extractor: Extractor | None = None
+    #: What may be remembered, in your words, for the default extractor:
+    #: "Only game facts... never age, school, location or social accounts."
+    rules: str | None = None
 
 
 class Memory:
@@ -422,7 +425,7 @@ class CharacterMemory:
         if self.policy.extractor is not None:
             return self.policy.extractor
         if self._chat is not None:
-            return LLMExtractor(self._chat)
+            return LLMExtractor(self._chat, rules=self.policy.rules)
         return None
 
     async def learn(

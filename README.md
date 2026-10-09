@@ -132,6 +132,11 @@ async with kael.control(secret) as session:  # ready when the player connects
     await session.run()
 ```
 
+Each player's memories still live on your server: `client_secret(player_id)`
+starts the session with them, and the `session.ended` webhook is what it learns
+from (`await kael.learn_from_session(verify_webhook(body, headers, secret), player_id=...)`).
+`MemoryPolicy(rules="Only game facts...")` says what may be remembered.
+
 ## Several players, any language, speaking first
 
 ```python

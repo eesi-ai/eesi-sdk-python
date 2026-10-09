@@ -165,11 +165,24 @@ def parse_result(text: str, ids: dict[str, str]) -> ExtractionResult:
     )
 
 
-class LLMExtractor:
-    """Memory extraction with a chat model. *chat* takes messages and returns the reply text."""
+#: How a game's own rules are added to the extraction prompt. Shared with the TypeScript SDK.
+RULES_SUFFIX = (
+    "\n\nWhat {character} may remember, set by the game, which wins over the rules "
+    "above where they differ:\n{rules}"
+)
 
-    def __init__(self, chat: Chat) -> None:
+
+class LLMExtractor:
+    """Memory extraction with a chat model. *chat* takes messages and returns the reply text.
+
+    *rules* narrow what may be kept, in your words: ``"Only game facts: what
+    they build, their favourite items, the name they use in the game. Never
+    age, school, location or social accounts."``
+    """
+
+    def __init__(self, chat: Chat, *, rules: str | None = None) -> None:
         self._chat = chat
+        self._rules = rules.strip() if rules and rules.strip() else None
 
     async def __call__(self, request: ExtractionRequest) -> ExtractionResult:
         transcript = _transcript_text(request)
@@ -189,7 +202,14 @@ class LLMExtractor:
         messages = [
             {
                 "role": "system",
-                "content": _SYSTEM.format(character=request.character_name),
+                "content": _SYSTEM.format(character=request.character_name)
+                + (
+                    RULES_SUFFIX.format(
+                        character=request.character_name, rules=self._rules
+                    )
+                    if self._rules
+                    else ""
+                ),
             },
             {
                 "role": "user",

@@ -9,6 +9,10 @@ may change public APIs; such changes are listed under **Changed**.
 
 ### Added
 
+- `character.learn_from_session(event, player_id=...)`: learn a player's
+  memories from a client-secret session's `session.ended` webhook, which now
+  carries the whole transcript; `input.completed` posts what the player said.
+- `MemoryPolicy(rules=...)`: what may be remembered, in your words.
 - `eesi`, the Nur SDK, in the same wheel as the REST client:
   `from eesi import NurClient`.
 - Characters: persona, traits, speaking style, goals, boundaries, knowledge,
