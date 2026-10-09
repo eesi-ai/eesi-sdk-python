@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from eesi.companion import Digest, Settings
 
 
 def _transcript(path: Path, cwd: Path, *, started: float) -> Path:
-    stamp = datetime.fromtimestamp(started, tz=UTC).isoformat().replace("+00:00", "Z")
+    stamp = datetime.fromtimestamp(started, tz=timezone.utc).isoformat().replace("+00:00", "Z")
     events = [
         {
             "type": "user",
