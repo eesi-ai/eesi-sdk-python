@@ -150,9 +150,11 @@ class PhoneNumber:
     """A number Nur may call on the shared EESI line, or one whose code is on its way."""
 
     number: str
-    #: ``confirmed``, or ``code_sent`` while the code Nur phoned in waits to be entered.
+    #: ``confirmed``, or ``code_sent`` while the code sent to it waits to be entered.
     status: str
     confirmed_at: float | None = None
+    #: How the code went while one waits: ``text`` or ``call``.
+    channel: str | None = None
 
     @property
     def confirmed(self) -> bool:
@@ -164,6 +166,7 @@ class PhoneNumber:
             number=str(data.get("number") or ""),
             status=str(data.get("status") or ""),
             confirmed_at=data.get("confirmed_at"),
+            channel=data.get("channel"),
         )
 
 
@@ -585,20 +588,24 @@ class NurClient:
         data = (await self._request("GET", "/phone/numbers")).json()
         return [PhoneNumber.from_json(item) for item in data.get("data") or []]
 
-    async def verify_phone_number(self, number: str) -> PhoneNumber:
-        """Have Nur phone *number* (E.164) a six-digit code; :meth:`confirm_phone_number` enters it.
+    async def verify_phone_number(
+        self, number: str, *, channel: str = "text"
+    ) -> PhoneNumber:
+        """Send *number* (E.164) a six-digit code; :meth:`confirm_phone_number` enters it.
 
-        A number already confirmed comes back confirmed, without a call.
+        By text, or ``channel="call"`` for a call the carrier reads it on (a
+        text the carrier refuses becomes a call). A number already confirmed
+        comes back confirmed, with nothing sent.
         """
         response = await self._request(
-            "POST", "/phone/numbers", json={"number": number}
+            "POST", "/phone/numbers", json={"number": number, "channel": channel}
         )
         return PhoneNumber.from_json(response.json())
 
     async def confirm_phone_number(
         self, number: str, code: str, *, name: str | None = None
     ) -> PhoneNumber:
-        """Enter the code Nur phoned in: from then on, Nur may call *number*.
+        """Enter the code sent to *number*: from then on, Nur may call and text it.
 
         *name* is what Nur calls the person when they call its lines.
         """

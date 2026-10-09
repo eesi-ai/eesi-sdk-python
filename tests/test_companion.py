@@ -18,7 +18,11 @@ from eesi.companion import Digest, Settings
 
 
 def _transcript(path: Path, cwd: Path, *, started: float) -> Path:
-    stamp = datetime.fromtimestamp(started, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    stamp = (
+        datetime.fromtimestamp(started, tz=timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     events = [
         {
             "type": "user",
@@ -442,9 +446,9 @@ class _Numbers:
     async def __aexit__(self, *exc):
         return None
 
-    async def verify_phone_number(self, number):
-        _Numbers.sent.append(number)
-        return PhoneNumber(number=number, status="code_sent")
+    async def verify_phone_number(self, number, *, channel="text"):
+        _Numbers.sent.append((number, channel))
+        return PhoneNumber(number=number, status="code_sent", channel=channel)
 
     async def confirm_phone_number(self, number, code, *, name=None):
         _Numbers.confirmed.append((number, code, name))
@@ -472,8 +476,8 @@ def test_setup_saves_the_settings_and_nur_phones_a_code(tmp_path, monkeypatch, c
         )
         == 0
     )
-    assert _Numbers.sent == ["+14155550123"]
-    assert "eesi companion confirm" in capsys.readouterr().out
+    assert _Numbers.sent == [("+14155550123", "text")]
+    assert "Nur texted +14155550123" in capsys.readouterr().out
     assert companion.main(["confirm", "482 917"]) == 0
     assert _Numbers.confirmed == [("+14155550123", "482917", "Amr")]
     assert companion.main(["setup", "--phone", "4155550123"]) == 1

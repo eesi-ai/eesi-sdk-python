@@ -160,7 +160,7 @@ its code line to start work or check how it is going.
 ```bash
 uv tool install git+https://github.com/eesi-ai/eesi-sdk-python   # the `eesi` command
 eesi companion setup --phone +14155550123 --name Sam --api-key sk-eesi-...
-eesi companion confirm 482917    # the code Nur phoned in
+eesi companion confirm 482917    # the code Nur texted you
 eesi companion listen            # beside your repository: call or text the line it prints
 ```
 

@@ -79,7 +79,7 @@ class _GeneratedClient:
     def confirm_phone_number(
         self, *, body: PhoneNumberConfirmation | Mapping[str, Any]
     ) -> PhoneNumber:
-        """Enter the code Nur phoned in; the number is confirmed for its calls."""
+        """Enter the code sent to the number; it is confirmed for Nur's calls and texts."""
         data = self._request(
             "POST",
             "/phone/numbers/confirm",
@@ -433,7 +433,7 @@ class _GeneratedClient:
     def verify_phone_number(
         self, *, body: PhoneNumberRequest | Mapping[str, Any]
     ) -> PhoneNumber:
-        """Have Nur phone a number a six-digit code; entering it confirms the number for calls on the shared EESI line."""
+        """Send a number a six-digit code, by text (or a call); entering it confirms the number for Nur's calls and texts on the shared EESI line."""
         data = self._request(
             "POST", "/phone/numbers", json=json_body(body, PhoneNumberRequest)
         )

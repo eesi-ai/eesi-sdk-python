@@ -462,6 +462,11 @@ class Status2(Enum):
     code_sent = "code_sent"
 
 
+class Channel(Enum):
+    text = "text"
+    call = "call"
+
+
 class PhoneNumber(BaseModel):
     """
     A number Nur may call on the shared line, or one whose code is on its way.
@@ -470,6 +475,7 @@ class PhoneNumber(BaseModel):
     number: Annotated[str, Field(title="Number")]
     status: Annotated[Status2, Field(title="Status")]
     confirmed_at: Annotated[int | None, Field(title="Confirmed At")] = None
+    channel: Annotated[Channel | None, Field(title="Channel")] = None
 
 
 class PhoneNumberConfirmation(BaseModel):
@@ -484,6 +490,7 @@ class PhoneNumberList(BaseModel):
 
 class PhoneNumberRequest(BaseModel):
     number: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Number")]
+    channel: Annotated[Channel | None, Field(title="Channel")] = Channel.text
 
 
 class RealtimeSessionUsageResponse(BaseModel):

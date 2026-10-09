@@ -6,7 +6,7 @@ hands what you ask for next back to the same agent session, which calls you
 again when that is done::
 
     eesi companion setup --phone +14155550123 --name Amr --api-key sk-eesi-...
-    eesi companion confirm 482917            # the code Nur phoned in
+    eesi companion confirm 482917            # the code Nur texted you
     eesi companion hook                      # as a Claude Code Stop hook
     eesi companion codex-notify              # as Codex's notify program
     eesi companion call                      # an update about this repo, now
@@ -29,7 +29,7 @@ default true), ``follow_up_minutes`` (how long a follow-up may run, default
 60) and ``claude_args`` / ``codex_args`` (flags for follow-up runs).
 
 On the shared EESI line, Nur calls only numbers confirmed with a code it
-phoned in (``setup`` asks for one, ``confirm`` enters it).
+texted (or, with ``setup --by call``, read on a call); ``confirm`` enters it.
 """
 
 from __future__ import annotations
@@ -835,12 +835,14 @@ def call_now(argv: list[str]) -> int:
     return 0
 
 
-async def _numbers(settings: Settings, action: str, code: str | None = None) -> Any:
+async def _numbers(
+    settings: Settings, action: str, code: str | None = None, channel: str = "text"
+) -> Any:
     from .client import NurClient
 
     async with NurClient(settings.api_key, base_url=settings.api_url) as nur:
         if action == "send":
-            return await nur.verify_phone_number(str(settings.phone))
+            return await nur.verify_phone_number(str(settings.phone), channel=channel)
         if action == "confirm":
             return await nur.confirm_phone_number(
                 str(settings.phone), str(code), name=settings.name
@@ -849,7 +851,7 @@ async def _numbers(settings: Settings, action: str, code: str | None = None) -> 
 
 
 def setup(argv: list[str]) -> int:
-    """Save who Nur calls and with which key; Nur phones the number a code to confirm it."""
+    """Save who Nur calls and with which key; Nur texts the number a code to confirm it."""
     from .errors import ApiError
 
     phone = _option(argv, "--phone")
@@ -865,6 +867,10 @@ def setup(argv: list[str]) -> int:
     notify = _option(argv, "--notify")
     if notify is not None and notify not in NOTIFY:
         print(f"--notify is one of: {', '.join(NOTIFY)}.")
+        return 1
+    by = _option(argv, "--by") or "text"
+    if by not in ("text", "call"):
+        print("--by is text or call: how the code reaches you.")
         return 1
     path = Settings.save(
         {
@@ -888,7 +894,7 @@ def setup(argv: list[str]) -> int:
         print("Add the number Nur calls: eesi companion setup --phone +14155550123")
         return 1
     try:
-        number = asyncio.run(_numbers(settings, "send"))
+        number = asyncio.run(_numbers(settings, "send", channel=by))
     except ApiError as error:
         print(f"Nur could not call {settings.phone}: {error}")
         return 1
@@ -897,21 +903,22 @@ def setup(argv: list[str]) -> int:
             f"{settings.phone} is confirmed: Nur calls it when your coding agent finishes."
         )
     else:
+        how = "is calling" if number.channel == "call" else "texted"
         print(
-            f"Nur is calling {settings.phone} with a six-digit code. "
+            f"Nur {how} {settings.phone} with a six-digit code. "
             "Then: eesi companion confirm <code>"
         )
     return 0
 
 
 def confirm(argv: list[str]) -> int:
-    """Enter the code Nur phoned in; from then on Nur may call the number."""
+    """Enter the code Nur sent; from then on Nur may call and text the number."""
     from .errors import ApiError
 
     settings = Settings.load()
     code = re.sub(r"\D", "", " ".join(argv))
     if not settings.phone or len(code) != 6:
-        print("Usage: eesi companion confirm 482917 (the code Nur phoned in).")
+        print("Usage: eesi companion confirm 482917 (the code Nur sent you).")
         return 1
     try:
         number = asyncio.run(_numbers(settings, "confirm", code))
