@@ -1,0 +1,16 @@
+#!/bin/sh
+# Nur's coding companion, from whichever EESI SDK this computer has: the `eesi`
+# command (uv tool, pipx), python3's own packages, or, with uv, the public
+# repository fetched on first use. A hook must never hold the agent up, so
+# without any of them it says how to install and exits cleanly.
+if command -v eesi >/dev/null 2>&1; then
+    exec eesi companion "$@"
+fi
+if python3 -c "import eesi.companion" >/dev/null 2>&1; then
+    exec python3 -m eesi companion "$@"
+fi
+if command -v uvx >/dev/null 2>&1; then
+    exec uvx --quiet --from "git+https://github.com/eesi-ai/eesi-sdk-python" eesi companion "$@"
+fi
+echo "Nur companion: install the EESI SDK first: uv tool install git+https://github.com/eesi-ai/eesi-sdk-python" >&2
+exit 0

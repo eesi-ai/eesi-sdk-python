@@ -150,6 +150,12 @@ def _trace(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["companion"]:
+        # Its own small command line: hooks hand it JSON on stdin or as an argument.
+        from .companion import main as companion
+
+        raise SystemExit(companion(arguments[1:]))
     parser = argparse.ArgumentParser(
         prog="python -m eesi", description="EESI Nur SDK tools."
     )

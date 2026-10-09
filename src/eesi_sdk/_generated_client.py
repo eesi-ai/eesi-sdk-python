@@ -28,11 +28,21 @@ from eesi_sdk._generated_models import (
     InteractionFailure,
     InteractionFailureList,
     InteractionFailureUpdate,
+    ListenerBrief,
+    ListenerEvents,
+    ListenerState,
     OrganizationTurnMetricsSummaryResponse,
+    PhoneCall,
+    PhoneCallRequest,
+    PhoneNumber,
+    PhoneNumberConfirmation,
+    PhoneNumberList,
+    PhoneNumberRequest,
     ScorecardResponse,
     SeparatedClip,
     SpeechModelsResponse,
     SpeechRequest,
+    TextRequest,
     UsageBreakdownResponse,
     UsageHistoryResponse,
     VoiceIsolation,
@@ -65,6 +75,23 @@ class _GeneratedClient:
     def chat_completions(self, *, body: Mapping[str, Any]) -> Any:
         """Chat completions. `body` is an OpenAI chat-completions request and is forwarded verbatim; the parsed completion is returned. Streaming (`stream: true`) is not supported by this method — use an OpenAI client for that."""
         return self._request("POST", "/chat/completions", json=dict(body))
+
+    def confirm_phone_number(
+        self, *, body: PhoneNumberConfirmation | Mapping[str, Any]
+    ) -> PhoneNumber:
+        """Enter the code Nur phoned in; the number is confirmed for its calls."""
+        data = self._request(
+            "POST",
+            "/phone/numbers/confirm",
+            json=json_body(body, PhoneNumberConfirmation),
+        )
+        return PhoneNumber.model_validate(data)
+
+    def create_phone_call(self, *, body: PhoneCallRequest | Mapping[str, Any]) -> Any:
+        """Have Nur call a phone number: say what the call is about, and Nur has the conversation. Fetch the call afterwards for its transcript."""
+        return self._request(
+            "POST", "/phone/calls", json=json_body(body, PhoneCallRequest)
+        )
 
     def create_realtime_client_secret(
         self, *, body: ClientSecretRequest | Mapping[str, Any]
@@ -167,6 +194,10 @@ class _GeneratedClient:
         data = self._request("DELETE", f"/voices/{voice_id}")
         return VoiceResponse.model_validate(data)
 
+    def forget_phone_number(self, number: str) -> Any:
+        """Stop Nur's calls to a number on the shared line until it is confirmed again."""
+        return self._request("DELETE", f"/phone/numbers/{number}")
+
     def get_api_keys(
         self, *, include_archived: bool | None = None
     ) -> list[APIKeyResponse]:
@@ -230,6 +261,11 @@ class _GeneratedClient:
             "GET", "/organizations/turn-metrics/summary", params=params
         )
         return OrganizationTurnMetricsSummaryResponse.model_validate(data)
+
+    def get_phone_call(self, call_id: str) -> PhoneCall:
+        """A call Nur placed: its status, and once it has ended, its transcript."""
+        data = self._request("GET", f"/phone/calls/{call_id}")
+        return PhoneCall.model_validate(data)
 
     def get_usage_breakdown(self, *, days: int | None = None) -> UsageBreakdownResponse:
         """Get usage cost broken down by kind, model and API key for the organization."""
@@ -318,6 +354,11 @@ class _GeneratedClient:
         data = self._request("GET", "/generations", params=params)
         return GenerationListResponse.model_validate(data)
 
+    def list_phone_numbers(self) -> PhoneNumberList:
+        """The numbers confirmed for Nur's calls on the shared EESI line."""
+        data = self._request("GET", "/phone/numbers")
+        return PhoneNumberList.model_validate(data)
+
     def list_speech_models(self) -> SpeechModelsResponse:
         """List speech models."""
         data = self._request("GET", "/audio/models")
@@ -327,6 +368,29 @@ class _GeneratedClient:
         """List the organization's cloned voices."""
         data = self._request("GET", "/voices")
         return VoicesListResponse.model_validate(data)
+
+    def phone_listener_events(self, *, wait: float | None = None) -> ListenerEvents:
+        """Calls to the code line that have ended, and texts to it, since you last asked; waits up to `wait` seconds for one."""
+        params: dict[str, Any] = {}
+        if wait is not None:
+            params["wait"] = wait
+        data = self._request("GET", "/phone/listener/events", params=params)
+        return ListenerEvents.model_validate(data)
+
+    def publish_phone_listener(
+        self, *, body: ListenerBrief | Mapping[str, Any]
+    ) -> ListenerState:
+        """Brief the code line: what a call about your code should know. Publish again before it expires; calls to the code line use the latest."""
+        data = self._request(
+            "PUT", "/phone/listener", json=json_body(body, ListenerBrief)
+        )
+        return ListenerState.model_validate(data)
+
+    def send_text(self, *, body: TextRequest | Mapping[str, Any]) -> Any:
+        """Text a number. On the shared EESI line: a confirmed number, from the code line, so a reply reaches Nur."""
+        return self._request(
+            "POST", "/phone/messages", json=json_body(body, TextRequest)
+        )
 
     def separate_reference_clip(self, *, file: FileInput) -> SeparatedClip:
         """Separate a voice from what was recorded around it, without storing either."""
@@ -365,6 +429,15 @@ class _GeneratedClient:
             "PATCH", f"/voices/{voice_id}", json=json_body(body, VoiceUpdateRequest)
         )
         return VoiceResponse.model_validate(data)
+
+    def verify_phone_number(
+        self, *, body: PhoneNumberRequest | Mapping[str, Any]
+    ) -> PhoneNumber:
+        """Have Nur phone a number a six-digit code; entering it confirms the number for calls on the shared EESI line."""
+        data = self._request(
+            "POST", "/phone/numbers", json=json_body(body, PhoneNumberRequest)
+        )
+        return PhoneNumber.model_validate(data)
 
     def voice_design_options(self) -> Any:
         """The serving backend's accepted voice-design vocabulary."""

@@ -1,0 +1,17 @@
+{
+  "name": "eesi",
+  "owner": {
+    "name": "EESI",
+    "url": "https://eesi.ai"
+  },
+  "metadata": {
+    "description": "EESI's plugins for coding agents: Nur, the coding companion that phones you."
+  },
+  "plugins": [
+    {
+      "name": "nur-companion",
+      "source": "./plugins/nur-companion",
+      "description": "Nur phones you when your coding agent finishes, answers questions about the run, runs what you ask for in the same session, and calls back."
+    }
+  ]
+}

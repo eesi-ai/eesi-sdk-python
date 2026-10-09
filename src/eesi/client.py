@@ -35,6 +35,8 @@ log = logging.getLogger("eesi")
 __all__ = [
     "ClientSecret",
     "NurClient",
+    "PhoneCall",
+    "PhoneNumber",
     "Voice",
     "VoiceDesign",
     "WebhookVerificationError",
@@ -104,6 +106,65 @@ class ClientSecret:
     #: ``joinSession(join)`` takes it as it is (the URL, who greets, who runs
     #: tools, how replies are asked for). Never holds the key or the control id.
     join: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PhoneCall:
+    """A call Nur placed: where it stands, and once it is over, what was said."""
+
+    id: str
+    session_id: str
+    #: ``dialing``, ``in_progress``, ``completed`` or ``not_answered``.
+    status: str
+    to: str
+    created_at: float
+    duration_seconds: float | None = None
+    #: ``(role, text)`` lines once the call has ended: ``person`` or ``nur``.
+    transcript: tuple[tuple[str, str], ...] = ()
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def finished(self) -> bool:
+        return self.status in ("completed", "not_answered")
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> PhoneCall:
+        return cls(
+            id=str(data.get("id") or ""),
+            session_id=str(data.get("session_id") or ""),
+            status=str(data.get("status") or ""),
+            to=str(data.get("to") or ""),
+            created_at=float(data.get("created_at") or 0),
+            duration_seconds=data.get("duration_seconds"),
+            transcript=tuple(
+                (str(turn.get("role") or ""), str(turn.get("text") or ""))
+                for turn in (data.get("transcript") or [])
+                if isinstance(turn, dict)
+            ),
+            metadata=dict(data.get("metadata") or {}),
+        )
+
+
+@dataclass(frozen=True)
+class PhoneNumber:
+    """A number Nur may call on the shared EESI line, or one whose code is on its way."""
+
+    number: str
+    #: ``confirmed``, or ``code_sent`` while the code Nur phoned in waits to be entered.
+    status: str
+    confirmed_at: float | None = None
+
+    @property
+    def confirmed(self) -> bool:
+        return self.status == "confirmed"
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> PhoneNumber:
+        return cls(
+            number=str(data.get("number") or ""),
+            status=str(data.get("status") or ""),
+            confirmed_at=data.get("confirmed_at"),
+        )
 
 
 class _MemoryFactory:
@@ -478,6 +539,126 @@ class NurClient:
         message = (choices[0] or {}).get("message") if choices else None
         content = (message or {}).get("content")
         return content if isinstance(content, str) else ""
+
+    async def call(
+        self,
+        to: str,
+        *,
+        instructions: str,
+        greeting: str | None = None,
+        voice: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> PhoneCall:
+        """Have Nur call a phone number (E.164) and hold the conversation *instructions* describe.
+
+        Returns at once, while the phone rings; :meth:`wait_for_call` waits
+        for it to end and returns its transcript.
+        """
+        body: dict[str, Any] = {"to": to, "instructions": instructions}
+        if greeting:
+            body["greeting"] = greeting
+        if voice:
+            body["voice"] = await self.resolve_voice(voice)
+        if metadata:
+            body["metadata"] = {str(k): str(v) for k, v in metadata.items()}
+        response = await self._request("POST", "/phone/calls", json=body)
+        return PhoneCall.from_json(response.json())
+
+    async def phone_call(self, call_id: str) -> PhoneCall:
+        """A call Nur placed, as it stands now."""
+        response = await self._request("GET", f"/phone/calls/{call_id}")
+        return PhoneCall.from_json(response.json())
+
+    async def wait_for_call(
+        self, call_id: str, *, timeout: float = 1800.0, poll: float = 5.0
+    ) -> PhoneCall:
+        """Wait until the call has ended (or was not answered), then return it."""
+        deadline = time.monotonic() + timeout
+        while True:
+            current = await self.phone_call(call_id)
+            if current.finished or time.monotonic() >= deadline:
+                return current
+            await asyncio.sleep(poll)
+
+    async def phone_numbers(self) -> list[PhoneNumber]:
+        """The numbers this organization confirmed for calls on the shared EESI line."""
+        data = (await self._request("GET", "/phone/numbers")).json()
+        return [PhoneNumber.from_json(item) for item in data.get("data") or []]
+
+    async def verify_phone_number(self, number: str) -> PhoneNumber:
+        """Have Nur phone *number* (E.164) a six-digit code; :meth:`confirm_phone_number` enters it.
+
+        A number already confirmed comes back confirmed, without a call.
+        """
+        response = await self._request(
+            "POST", "/phone/numbers", json={"number": number}
+        )
+        return PhoneNumber.from_json(response.json())
+
+    async def confirm_phone_number(
+        self, number: str, code: str, *, name: str | None = None
+    ) -> PhoneNumber:
+        """Enter the code Nur phoned in: from then on, Nur may call *number*.
+
+        *name* is what Nur calls the person when they call its lines.
+        """
+        body = {"number": number, "code": code}
+        if name:
+            body["name"] = name
+        response = await self._request("POST", "/phone/numbers/confirm", json=body)
+        return PhoneNumber.from_json(response.json())
+
+    async def publish_listener(
+        self,
+        *,
+        phone: str,
+        instructions: str,
+        greeting: str | None = None,
+        name: str | None = None,
+        repo: str | None = None,
+        texting: str | None = None,
+    ) -> dict[str, Any]:
+        """Brief the code line: what a call from *phone* about your code should know.
+
+        Publish again before ``expires_in`` seconds pass; ``lines`` are the
+        shared numbers that answer, and as which line (``code`` or ``live``).
+        """
+        body: dict[str, Any] = {"phone": phone, "instructions": instructions}
+        for key, value in (
+            ("greeting", greeting),
+            ("name", name),
+            ("repo", repo),
+            ("texting", texting),
+        ):
+            if value:
+                body[key] = value
+        return dict((await self._request("PUT", "/phone/listener", json=body)).json())
+
+    async def listener_events(self, *, wait: float = 20.0) -> list[dict[str, Any]]:
+        """What reached the code line since you last asked (waits up to *wait* s).
+
+        ``{"type": "call.ended", "call_id": ...}`` for a call (read it with
+        :meth:`phone_call`), ``{"type": "text.received", "text": ..., "reply": ...}``
+        for a text and Nur's reply.
+        """
+        response = await self._request(
+            "GET",
+            "/phone/listener/events",
+            params={"wait": wait},
+            timeout=wait + 15,
+        )
+        return [dict(event) for event in response.json().get("data") or []]
+
+    async def send_text(self, to: str, text: str) -> dict[str, Any]:
+        """Text *to* (a confirmed number on the shared line), from the code line."""
+        response = await self._request(
+            "POST", "/phone/messages", json={"to": to, "text": text}
+        )
+        return dict(response.json())
+
+    async def forget_phone_number(self, number: str) -> None:
+        """Stop calls to *number* on the shared line, until it is confirmed again."""
+        await self._request("DELETE", f"/phone/numbers/{number}")
 
     async def ticket(self) -> str:
         """A one-shot WebSocket ticket (``rt_…``): the client configures the character itself."""

@@ -365,6 +365,127 @@ class LatencyBucket(BaseModel):
     count: Annotated[int, Field(title="Count")]
 
 
+class Name(RootModel[str]):
+    root: Annotated[str, Field(max_length=80, title="Name")]
+
+
+class Repo(RootModel[str]):
+    root: Annotated[str, Field(max_length=200, title="Repo")]
+
+
+class Greeting(RootModel[str]):
+    root: Annotated[str, Field(max_length=600, title="Greeting")]
+
+
+class Texting(RootModel[str]):
+    root: Annotated[str, Field(max_length=16000, title="Texting")]
+
+
+class ListenerBrief(BaseModel):
+    """
+    What the listener beside the code says a call about it should know.
+    """
+
+    phone: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Phone")]
+    name: Annotated[Name | None, Field(title="Name")] = None
+    repo: Annotated[Repo | None, Field(title="Repo")] = None
+    instructions: Annotated[
+        str, Field(max_length=16000, min_length=1, title="Instructions")
+    ]
+    greeting: Annotated[Greeting | None, Field(title="Greeting")] = None
+    texting: Annotated[Texting | None, Field(title="Texting")] = None
+
+
+class Type(Enum):
+    call_ended = "call.ended"
+    text_received = "text.received"
+
+
+class ListenerEvent(BaseModel):
+    type: Annotated[Type, Field(title="Type")]
+    call_id: Annotated[str | None, Field(title="Call Id")] = None
+    text: Annotated[str | None, Field(title="Text")] = None
+    reply: Annotated[str | None, Field(title="Reply")] = None
+
+
+class ListenerEvents(BaseModel):
+    data: Annotated[list[ListenerEvent], Field(title="Data")]
+
+
+class Status1(Enum):
+    dialing = "dialing"
+    in_progress = "in_progress"
+    completed = "completed"
+    not_answered = "not_answered"
+
+
+class Voice(RootModel[str]):
+    root: Annotated[str, Field(max_length=128, title="Voice")]
+
+
+class PhoneCallRequest(BaseModel):
+    """
+    Who Nur calls, and what the call is about.
+    """
+
+    to: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="To")]
+    instructions: Annotated[
+        str, Field(max_length=16000, min_length=1, title="Instructions")
+    ]
+    greeting: Annotated[Greeting | None, Field(title="Greeting")] = None
+    voice: Annotated[Voice | None, Field(title="Voice")] = None
+    metadata: Annotated[dict[str, str] | None, Field(title="Metadata")] = None
+
+
+class Role(Enum):
+    person = "person"
+    nur = "nur"
+
+
+class PhoneCallTurn(BaseModel):
+    role: Annotated[Role, Field(title="Role")]
+    text: Annotated[str, Field(title="Text")]
+
+
+class Kind(Enum):
+    code = "code"
+    live = "live"
+
+
+class PhoneLine(BaseModel):
+    number: Annotated[str, Field(title="Number")]
+    kind: Annotated[Kind, Field(title="Kind")]
+
+
+class Status2(Enum):
+    confirmed = "confirmed"
+    code_sent = "code_sent"
+
+
+class PhoneNumber(BaseModel):
+    """
+    A number Nur may call on the shared line, or one whose code is on its way.
+    """
+
+    number: Annotated[str, Field(title="Number")]
+    status: Annotated[Status2, Field(title="Status")]
+    confirmed_at: Annotated[int | None, Field(title="Confirmed At")] = None
+
+
+class PhoneNumberConfirmation(BaseModel):
+    number: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Number")]
+    code: Annotated[str, Field(pattern="^\\d{6}$", title="Code")]
+    name: Annotated[Name | None, Field(title="Name")] = None
+
+
+class PhoneNumberList(BaseModel):
+    data: Annotated[list[PhoneNumber], Field(title="Data")]
+
+
+class PhoneNumberRequest(BaseModel):
+    number: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Number")]
+
+
 class RealtimeSessionUsageResponse(BaseModel):
     """
     One metered realtime session.
@@ -395,6 +516,12 @@ class ScorecardResponse(BaseModel):
     bundles: Annotated[list[BundleScorecard], Field(title="Bundles")]
 
 
+class SentText(BaseModel):
+    id: Annotated[str | None, Field(title="Id")] = None
+    to: Annotated[str, Field(title="To")]
+    from_number: Annotated[str, Field(title="From Number")]
+
+
 class SeparatedClip(BaseModel):
     """
     One take, pulled apart, before any of it is cloned.
@@ -412,7 +539,7 @@ class SeparatedClip(BaseModel):
     suggest_isolated: Annotated[bool, Field(title="Suggest Isolated")]
 
 
-class Kind(Enum):
+class Kind1(Enum):
     tts = "tts"
     stt = "stt"
     realtime = "realtime"
@@ -430,7 +557,7 @@ class SpeechModelInfo(BaseModel):
     """
 
     id: Annotated[str, Field(title="Id")]
-    kind: Annotated[Kind, Field(title="Kind")]
+    kind: Annotated[Kind1, Field(title="Kind")]
     tier: Annotated[Tier, Field(title="Tier")]
     supports_streaming: Annotated[bool, Field(title="Supports Streaming")]
     supports_cloning: Annotated[bool, Field(title="Supports Cloning")]
@@ -486,6 +613,11 @@ class SpeechRequest(BaseModel):
     language: Annotated[str | None, Field(title="Language")] = None
     normalize_text: Annotated[bool | None, Field(title="Normalize Text")] = False
     source: Annotated[Source | None, Field(title="Source")] = None
+
+
+class TextRequest(BaseModel):
+    to: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="To")]
+    text: Annotated[str, Field(max_length=640, min_length=1, title="Text")]
 
 
 class TurnMetricsCoverage(BaseModel):
@@ -619,7 +751,7 @@ class VoiceIsolationRequest(BaseModel):
     use_isolated: Annotated[bool, Field(title="Use Isolated")]
 
 
-class Status1(Enum):
+class Status3(Enum):
     processing = "processing"
     ready = "ready"
     failed = "failed"
@@ -629,7 +761,7 @@ class VoiceResponse(BaseModel):
     voice_id: Annotated[str, Field(title="Voice Id")]
     name: Annotated[str, Field(title="Name")]
     engine: Annotated[str, Field(title="Engine")]
-    status: Annotated[Status1, Field(title="Status")]
+    status: Annotated[Status3, Field(title="Status")]
     error: Annotated[str | None, Field(title="Error")] = None
     has_ref_text: Annotated[bool, Field(title="Has Ref Text")]
     ref_text: Annotated[str | None, Field(title="Ref Text")] = None
@@ -763,10 +895,30 @@ class HTTPValidationError(BaseModel):
     detail: Annotated[list[ValidationError] | None, Field(title="Detail")] = None
 
 
+class ListenerState(BaseModel):
+    expires_in: Annotated[int, Field(title="Expires In")]
+    lines: Annotated[list[PhoneLine], Field(title="Lines")]
+
+
 class OrganizationTurnMetricsSummaryResponse(BaseModel):
     days: Annotated[int | None, Field(title="Days")] = None
     since: Annotated[AwareDatetime | None, Field(title="Since")] = None
     summary: TurnMetricsSummary
+
+
+class PhoneCall(BaseModel):
+    """
+    One call: where it stands, and when it is over, what was said.
+    """
+
+    id: Annotated[str, Field(title="Id")]
+    session_id: Annotated[str, Field(title="Session Id")]
+    status: Annotated[Status1, Field(title="Status")]
+    to: Annotated[str, Field(title="To")]
+    created_at: Annotated[int, Field(title="Created At")]
+    duration_seconds: Annotated[float | None, Field(title="Duration Seconds")] = None
+    transcript: Annotated[list[PhoneCallTurn] | None, Field(title="Transcript")] = None
+    metadata: Annotated[dict[str, str] | None, Field(title="Metadata")] = None
 
 
 class UsageBreakdownResponse(BaseModel):

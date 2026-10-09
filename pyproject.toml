@@ -1,6 +1,6 @@
 [project]
 name = "eesi-sdk"
-version = "0.3.0"
+version = "0.4.0"
 description = "EESI for Python: Nur Live characters with voice, memory, live context and tools, plus the typed REST client"
 readme = "README.md"
 requires-python = ">=3.10"

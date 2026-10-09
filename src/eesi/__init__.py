@@ -37,6 +37,8 @@ from .character import Character
 from .client import (
     ClientSecret,
     NurClient,
+    PhoneCall,
+    PhoneNumber,
     Voice,
     VoiceDesign,
     WebhookVerificationError,
@@ -99,6 +101,8 @@ __all__ = [
     "MemoryStore",
     "MemoryStoreError",
     "NurClient",
+    "PhoneCall",
+    "PhoneNumber",
     "PRESETS",
     "Player",
     "PlayerMemory",

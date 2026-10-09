@@ -5,6 +5,35 @@ All notable changes to `eesi-sdk` for Python. The format follows
 follows [Semantic Versioning](https://semver.org/). Before 1.0, a minor version
 may change public APIs; such changes are listed under **Changed**.
 
+## 0.4.0
+
+### Added
+
+- Nur on the phone. `nur.call(number, instructions=..., greeting=...)` has
+  Nur call a number and hold the conversation; `wait_for_call` returns its
+  transcript. On the shared EESI line Nur calls only confirmed numbers:
+  `verify_phone_number` has the carrier read a six-digit code,
+  `confirm_phone_number` enters it, `phone_numbers` and
+  `forget_phone_number` list and drop them. `send_text` texts a confirmed
+  number from the code line.
+- `eesi companion`: Nur phones you when Claude Code or Codex finishes, answers
+  questions about the run (what was asked, what the agent said, files,
+  commands, lines added and removed, commits today, languages), runs what you
+  ask for in the same session and calls back with the result, or with why it
+  could not run. `setup` keeps the number, name and key in
+  `~/.eesi/companion.json` (readable by you only), `confirm` enters the code,
+  `status` shows it all, `call` asks for an update now.
+- The code line: `eesi companion listen` runs beside a repository and briefs
+  the line with what is running (and its latest steps), what is queued and
+  done. Call or text the line it prints to start work or check on it; tasks
+  run one after another in one Claude Code or Codex session, and Nur calls or
+  texts (`--notify call|text|both`) with each result.
+- The `nur-companion` Claude Code plugin, in this repository's marketplace:
+  `/plugin marketplace add eesi-ai/eesi-sdk-python`, then
+  `/plugin install nur-companion@eesi`; hooks run through a launcher that finds
+  the SDK (or fetches it with uv), with `/nur-companion:setup` and
+  `/nur-companion:call-me`.
+
 ## 0.3.0
 
 ### Added

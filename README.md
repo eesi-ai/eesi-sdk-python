@@ -151,6 +151,24 @@ luna = nur.companion(name="Luna", proactive=Proactive(idle_after=30))
 A room mixes your voice chat's microphones into one conversation and knows who
 spoke from the audio; each player is answered in their own language.
 
+## Nur on the phone: your coding companion
+
+Nur calls you when Claude Code or Codex finishes, answers questions about the
+run, runs what you ask for in the same session, and calls back. Call or text
+its code line to start work or check how it is going.
+
+```bash
+uv tool install git+https://github.com/eesi-ai/eesi-sdk-python   # the `eesi` command
+eesi companion setup --phone +14155550123 --name Sam --api-key sk-eesi-...
+eesi companion confirm 482917    # the code Nur phoned in
+eesi companion listen            # beside your repository: call or text the line it prints
+```
+
+Claude Code: `/plugin marketplace add eesi-ai/eesi-sdk-python`, then
+`/plugin install nur-companion@eesi`. Codex: `notify = ["eesi", "companion",
+"codex-notify"]` in `~/.codex/config.toml`. The whole guide:
+[Coding companion](https://docs.eesi.ai/realtime/coding-companion).
+
 ## Guides and examples
 
 - The guide: [docs.eesi.ai/realtime/characters](https://docs.eesi.ai/realtime/characters)

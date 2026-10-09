@@ -1,0 +1,19 @@
+{
+  "name": "nur-companion",
+  "version": "0.2.0",
+  "description": "Nur, your coding companion: when Claude finishes, Nur phones you with what was done, answers your questions, runs what you ask for in the same session, and calls back when that is done.",
+  "author": {
+    "name": "EESI",
+    "url": "https://eesi.ai"
+  },
+  "homepage": "https://docs.eesi.ai/realtime/coding-companion",
+  "repository": "https://github.com/eesi-ai/eesi-sdk-python",
+  "license": "BSD-2-Clause",
+  "keywords": [
+    "voice",
+    "phone",
+    "notifications",
+    "companion",
+    "nur"
+  ]
+}
