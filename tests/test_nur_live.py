@@ -1,4 +1,4 @@
-"""Real Nur Live sessions through the SDK. Skipped unless EESI_LIVE_TESTS=1 and EESI_API_KEY are set.
+"""Real Nur sessions through the SDK. Skipped unless EESI_LIVE_TESTS=1 and EESI_API_KEY are set.
 
 These cost usage and depend on a deployment's models, so they assert what
 must hold (a tool runs when asked, a player is remembered, two players stay

@@ -1,7 +1,7 @@
 [project]
 name = "eesi-sdk"
 version = "0.4.0"
-description = "EESI for Python: Nur Live characters with voice, memory, live context and tools, plus the typed REST client"
+description = "EESI for Python: Nur characters with voice, memory, live context and tools, plus the typed REST client"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "BSD-2-Clause" }
@@ -31,6 +31,10 @@ dependencies = [
 audio = [
     "numpy>=1.26",
     "sounddevice>=0.5",
+]
+# `eesi engineer`: Nur as your team's engineering assistant over Claude Code.
+engineer = [
+    "claude-agent-sdk>=0.2.150",
 ]
 dev = [
     "pytest>=7.0",

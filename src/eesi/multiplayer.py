@@ -6,7 +6,7 @@ Two shapes:
   separate conversation, so without help the character forgets what it told
   the others. With ``party=True`` the character keeps a :class:`PartyLog` of
   who said what to whom, shared by its sessions as the ``party`` block.
-- **One microphone, several people** (a couch, a table). Nur Live tags each
+- **One microphone, several people** (a couch, a table). Nur tags each
   line ``Speaker N:`` once it has heard a second voice. Pass ``players=`` to
   ``connect`` and a :class:`SpeakerRoster` binds those numbers to names, from
   introductions ("I'm Layla") and the order voices were first heard. It is a
@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ._protocol import split_speaker_turns
+from ._protocol import parse_speaker_turns
 
 __all__ = ["AttributedTurn", "PartyLog", "Player", "SpeakerRoster", "as_players"]
 
@@ -106,6 +106,7 @@ class AttributedTurn:
     text: str
     speaker: int | None
     player: str | None
+    unattributed: bool = False
 
 
 _INTRODUCTION = re.compile(
@@ -159,7 +160,15 @@ class SpeakerRoster:
 
     def attribute(self, transcript: str) -> list[AttributedTurn]:
         turns: list[AttributedTurn] = []
-        for speaker, text in split_speaker_turns(transcript):
+        for turn in parse_speaker_turns(transcript):
+            speaker, text = turn.speaker, turn.text
+            if turn.unattributed:
+                turns.append(
+                    AttributedTurn(
+                        text=text, speaker=None, player=None, unattributed=True
+                    )
+                )
+                continue
             hello = self._named(text, _INTRODUCTION)
             if hello and speaker is None and hello not in self._hello_order:
                 self._hello_order.append(hello)

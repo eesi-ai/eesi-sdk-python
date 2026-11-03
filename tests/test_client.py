@@ -104,7 +104,7 @@ def test_422_array_is_flattened_one_message_per_line():
                         "msg": "Field required",
                         "type": "missing",
                     },
-                    {"model": "nur-tts-v1", "message": "Backend unavailable"},
+                    {"model": "nur-v1", "message": "Backend unavailable"},
                     "plain string item",
                 ]
             },
@@ -114,7 +114,7 @@ def test_422_array_is_flattened_one_message_per_line():
         client.get_voice("voice_1")
     assert exc.value.status_code == 422
     assert exc.value.message == (
-        "Field required\nnur-tts-v1: Backend unavailable\nplain string item"
+        "Field required\nnur-v1: Backend unavailable\nplain string item"
     )
 
 
@@ -152,7 +152,7 @@ def test_create_transcription_sends_file_and_fields_as_multipart():
     client = make_client(handler)
     result = client.create_transcription(
         file=("clip.wav", b"RIFF....", "audio/wav"),
-        model="nur-stt-v1",
+        model="nur-v1",
         timestamp_granularities=["word", "segment"],
         temperature=0.2,
     )
@@ -166,7 +166,7 @@ def test_create_transcription_sends_file_and_fields_as_multipart():
     body = request.read().decode("latin-1")
     assert 'name="file"; filename="clip.wav"' in body
     assert "Content-Type: audio/wav" in body
-    assert 'name="model"\r\n\r\nnur-stt-v1' in body
+    assert 'name="model"\r\n\r\nnur-v1' in body
     assert 'name="temperature"\r\n\r\n0.2' in body
     # The list field is repeated under its wire name, `[]` suffix included.
     assert body.count('name="timestamp_granularities[]"') == 2
@@ -185,7 +185,7 @@ def test_create_voice_takes_raw_bytes_and_booleans():
             json={
                 "voice_id": "voice_1",
                 "name": "Sarah",
-                "engine": "nur-tts-v1",
+                "engine": "nur-v1",
                 "status": "ready",
                 "has_ref_text": False,
                 "created_at": "2026-01-01T00:00:00Z",
@@ -210,7 +210,7 @@ def test_chat_completions_forwards_the_json_body_verbatim():
         return httpx.Response(200, json={"choices": []})
 
     client = make_client(handler)
-    payload = {"model": "nur-llm-v1", "messages": [{"role": "user", "content": "hi"}]}
+    payload = {"model": "nur-v1", "messages": [{"role": "user", "content": "hi"}]}
     assert client.chat_completions(body=payload) == {"choices": []}
     assert seen[0].headers["content-type"] == "application/json"
     assert seen[0].read() == httpx.Request("POST", "http://x", json=payload).read()
@@ -224,7 +224,7 @@ def test_create_speech_returns_the_audio_bytes():
         )
     )
     out = client.create_speech(
-        body=SpeechRequest(model="nur-tts-v1", input="Hello", voice="ev_1a2b3c4d")
+        body=SpeechRequest(model="nur-v1", input="Hello", voice="ev_1a2b3c4d")
     )
     assert out == audio
 
@@ -245,7 +245,7 @@ def test_a_mapping_body_is_validated_and_sent():
     client = make_client(handler)
     out = client.create_speech(
         body={
-            "model": "nur-tts-v1",
+            "model": "nur-v1",
             "voice": "ev_1a2b3c4d",
             "input": "Hello",
             "response_format": "wav",
@@ -265,7 +265,7 @@ def test_a_body_missing_a_field_names_the_field_before_the_wire():
     client = make_client(_never_called)
 
     with pytest.raises(InvalidRequestError) as exc:
-        client.create_speech(body={"model": "nur-tts-v1", "input": "Hello"})
+        client.create_speech(body={"model": "nur-v1", "input": "Hello"})
 
     message = str(exc.value)
     assert "SpeechRequest" in message
@@ -277,7 +277,7 @@ def test_a_body_that_is_not_a_body_at_all_says_what_was_passed():
     client = make_client(_never_called)
 
     with pytest.raises(InvalidRequestError) as exc:
-        client.create_speech(body="nur-tts-v1")  # type: ignore[arg-type]
+        client.create_speech(body="nur-v1")  # type: ignore[arg-type]
 
     assert "must be a SpeechRequest or a mapping of its fields, not str" in str(
         exc.value
@@ -295,7 +295,7 @@ def test_the_readme_quickstart_reaches_a_usable_voice_id():
                     {
                         "voice_id": "ev_1a2b3c4d",
                         "name": "Nur",
-                        "engine": "omnivoice",
+                        "engine": "nur-v1",
                         "status": "ready",
                         "has_ref_text": True,
                         "created_at": "2026-01-01T00:00:00Z",
@@ -401,5 +401,5 @@ def test_post_is_never_retried(monkeypatch: pytest.MonkeyPatch):
 
     client = make_client(handler)
     with pytest.raises(httpx.ConnectError):
-        client.chat_completions(body={"model": "nur-llm-v1", "messages": []})
+        client.chat_completions(body={"model": "nur-v1", "messages": []})
     assert calls == 1

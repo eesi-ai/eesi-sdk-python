@@ -1,4 +1,4 @@
-"""A session against a fake Nur Live gateway: the wire the SDK actually speaks.
+"""A session against a fake Nur gateway: the wire the SDK actually speaks.
 
 These tests run the real WebSocket client against a local server that
 behaves like the gateway's protocol surface. They prove what the SDK sends
@@ -86,9 +86,7 @@ async def test_connect_sends_the_character_then_its_state_then_a_greeting(api):
             await session.close(learn=False)
 
         assert gateway.headers[0]["Authorization"] == "Bearer sk-eesi-test"
-        assert (
-            "model=nur-live-v1" in gateway.paths[0] and "source=sdk" in gateway.paths[0]
-        )
+        assert "model=nur-v1" in gateway.paths[0] and "source=sdk" in gateway.paths[0]
         assert "timezone=Europe%2FBerlin" in gateway.paths[0]
         assert update["instructions"].startswith(
             "You are Kael, a character who lives in this world."

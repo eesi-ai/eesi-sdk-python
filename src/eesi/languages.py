@@ -1,7 +1,7 @@
 """Language codes and names.
 
 A character or a player's session can be pinned to one language. The SDK then
-tells Nur Live both the code (so the greeting and anything said before the
+tells Nur both the code (so the greeting and anything said before the
 player's first words come out in that language) and a name (the language the
 replies are held to). A regional code names the variety: ``ar-EG`` is
 Egyptian Arabic. Anything else you pass is used as the name as written, so

@@ -5,6 +5,36 @@ All notable changes to `eesi-sdk` for Python. The format follows
 follows [Semantic Versioning](https://semver.org/). Before 1.0, a minor version
 may change public APIs; such changes are listed under **Changed**.
 
+## Unreleased
+
+### Added
+
+- Remote MCP servers: `McpServer(url, label=..., allowed_tools=...,
+  authorization=...)` in a character's `mcp_servers=`. EESI lists the
+  server's tools, offers them to the character and runs every call itself;
+  the session reports them as events (`mcp.tools.listed`, `mcp.tools.failed`,
+  `mcp.call.started`, `mcp.call.completed`, `mcp.call.failed`,
+  `mcp.approval.requested`). A tool that changes things waits for the
+  player's yes, said out loud or sent with `session.approve_mcp(request_id)`.
+  A saved character names its servers by label only; pass them again to
+  `load_character(..., mcp_servers=[...])`.
+
+### Removed
+
+- The interaction-failure methods `list_failures`, `get_failure`,
+  `update_failure` and `get_failure_scorecard`, with their models
+  (`InteractionFailure`, `InteractionFailureList`, `InteractionFailureUpdate`,
+  `ScorecardResponse`, `BundleScorecard`, `Notes`). EESI's rule-based failure
+  queue was retired: what went wrong in a session is now its review.
+
+### Changed
+
+- With those models gone, the generated status enums are renumbered:
+  `PhoneCall.status` is `Status` (was `Status1`), `PhoneNumber.status` is
+  `Status1` (was `Status2`) and `VoiceResponse.status` is `Status2` (was
+  `Status3`). Code that compares values is unaffected; code that imports these
+  generated names must follow them.
+
 ## 0.4.0
 
 ### Added
@@ -49,7 +79,7 @@ may change public APIs; such changes are listed under **Changed**.
   `storyteller`, `support_agent` and `assistant`; save, load and clone as JSON.
 - Voices by built-in name, by id, or described in words (`nur.voice_design`),
   created once in your library and reused by name.
-- Realtime sessions on Nur Live: turn-taking modes (`natural`, `app`,
+- Realtime sessions on Nur: turn-taking modes (`natural`, `app`,
   `director`), barge-in, resume after a dropped connection, typed events,
   `ask()`, `cue()`, `moment()`, `say()`, `interrupt()` and hangup handling.
 - Tools from plain functions, with schemas from type hints and docstrings,

@@ -251,8 +251,8 @@ async def test_fields_expire():
 @run_async
 async def test_a_block_too_large_or_badly_named_is_refused_with_why():
     context = LiveContext("scene")
-    with pytest.raises(ContextError, match="8,000"):
-        await context.update({"save": "x" * 9_000})
+    with pytest.raises(ContextError, match="200,000"):
+        await context.update({"save": "x" * 201_000})
     with pytest.raises(ContextError, match="lowercase"):
         await context.update({"a": 1}, block="World State")
 
@@ -307,8 +307,8 @@ def test_the_publisher_refuses_more_blocks_than_a_session_holds():
     publisher = ContextPublisher(send, [])
     with pytest.raises(ContextError, match="at most 8"):
         publisher.validate({f"k{i}": "x" for i in range(9)})
-    with pytest.raises(ContextError, match="24,000"):
-        publisher.validate({f"k{i}": "x" * 7_000 for i in range(4)})
+    with pytest.raises(ContextError, match="256,000"):
+        publisher.validate({f"k{i}": "x" * 70_000 for i in range(4)})
 
 
 # ── memory ───────────────────────────────────────────────────────────────
@@ -912,3 +912,79 @@ async def test_a_finished_call_is_learned_from_its_webhook():
     assert await sage.learn_from_session(
         {"type": "response.completed"}, player_id="p-123"
     ) == ([], [], [])
+
+
+@run_async
+async def test_a_described_voice_is_designed_and_kept_through_the_api():
+    import base64
+    import json as json_module
+
+    import httpx
+
+    calls: list[tuple[str, str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json_module.loads(request.content) if request.content else {}
+        calls.append((request.method, request.url.path, body))
+        path = request.url.path
+        if path.endswith("/voices") and request.method == "GET":
+            return httpx.Response(200, json={"data": []})
+        if path.endswith("/voices/design"):
+            takes = [
+                {"take_id": f"t{i}", "audio": base64.b64encode(b"RIFF%d" % i).decode()}
+                for i in range(3)
+            ]
+            return httpx.Response(200, json={"takes": takes, "name": "Harold"})
+        if path.endswith("/voices/design/keep"):
+            return httpx.Response(
+                200,
+                json={
+                    "voice_id": "ev_kept",
+                    "status": "ready",
+                    "category": "characters",
+                },
+            )
+        return httpx.Response(404, json={"error": {"message": path}})
+
+    nur = NurClient(
+        api_key="k",
+        base_url="https://api.example.test",
+        transport=httpx.MockTransport(handler),
+    )
+    voice = await nur.design_voice(
+        "Harold", "a calm older man with a deep voice", take=1
+    )
+    assert voice.id == "ev_kept" and voice.status == "ready"
+    design = next(
+        body for method, path, body in calls if path.endswith("/voices/design")
+    )
+    assert design == {
+        "description": "a calm older man with a deep voice",
+        "language": "en",
+    }
+    keep = next(body for method, path, body in calls if path.endswith("/design/keep"))
+    assert keep["take_id"] == "t1" and keep["name"] == "Harold"
+    # Nothing is uploaded as a recording, and nothing is attested.
+    assert not any(
+        path.endswith("/voices") and method == "POST" for method, path, _ in calls
+    )
+
+
+def test_the_wire_says_scripted_lines_buffer_clears_and_item_deletes():
+    """The shapes docs.eesi.ai/realtime/live documents, as the SDK builds them."""
+    from eesi import _protocol as wire
+
+    assert wire.force_message("This call is being recorded.", interruptible=False) == {
+        "type": "conversation.item.create",
+        "item": {
+            "type": "force_message",
+            "role": "assistant",
+            "interruptible": False,
+            "content": [{"type": "output_text", "text": "This call is being recorded."}],
+        },
+    }
+    assert wire.force_message("Hi.", item_id="item_hi")["item"]["id"] == "item_hi"
+    assert wire.force_message("Hi.")["item"]["interruptible"] is True
+    assert wire.clear_input_audio() == {"type": "input_audio_buffer.clear"}
+    assert wire.delete_item("item_1") == {"type": "conversation.item.delete", "item_id": "item_1"}
+    assert (wire.MAX_PRONUNCIATIONS, wire.MAX_KEYTERMS, wire.MAX_KEYTERM_CHARS) == (200, 100, 50)

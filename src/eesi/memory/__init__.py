@@ -101,7 +101,7 @@ class MemoryPolicy:
     #: Search memories for what the player just said, and refresh the block.
     recall_on_turn: bool = True
     weights: RecallWeights = field(default_factory=RecallWeights)
-    #: Your own extraction model; the default asks nur-llm-v1 with your key.
+    #: Your own extraction model; the default asks nur-v1 with your key.
     extractor: Extractor | None = None
     #: What may be remembered, in your words, for the default extractor:
     #: "Only game facts... never age, school, location or social accounts."

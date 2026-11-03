@@ -6,9 +6,9 @@
         await session.context.update({"location": "Northern Gate"})
         await session.run()  # until the conversation ends
 
-The session holds an ordinary Nur Live realtime connection
+The session holds an ordinary Nur realtime connection
 (``wss://…/v1/realtime``) under your API key, so authentication, metering,
-recording consent and organization scope stay at the gateway. Nur Live owns
+recording consent and organization scope stay at the gateway. Nur owns
 the conversation itself: voice activity, turn-taking, interruptions,
 backchannels, the history and cancellation. The session owns what the
 application knows: the character, live context, memory, tools, and the audio
@@ -65,6 +65,7 @@ from .events import (
     Reconnecting,
     ResponseCancelled,
     ResponseCompleted,
+    ResponseContext,
     ResponseStarted,
     ResponseTextDelta,
     SessionEnded,
@@ -78,6 +79,7 @@ from .events import (
     TranscriptPartial,
 )
 from .languages import describe
+from .mcp import McpEvents
 from .memory import MemoryRecord, PlayerMemory
 from .multiplayer import AttributedTurn, Player, SpeakerRoster, as_players
 from .proactive import IDLE_SKIP, Trigger
@@ -134,6 +136,10 @@ class _Response:
     speak_after: bool = False
     done: bool = False
     cancelled: bool = False
+    #: Its input contained explicitly unknown speech; never personal learning.
+    unattributed: bool = False
+    #: Immutable ownership snapshot for this response's tools and party entry.
+    player_id: str | None = None
     continued: bool = False
     #: The player turn this reply answers, when it answers one.
     turn_ended_at: float | None = None
@@ -255,6 +261,7 @@ class Session:
         self.capabilities: dict[str, Any] = {}
         #: (speaker, text) lines as the SDK saw them: "player", a player's name, "event" or the character's name.
         self.transcript: list[tuple[str, str]] = []
+        self._memory_excluded_lines: set[int] = set()
         self.preferences = Preferences(self)
         self._extra_instructions = instructions
         self._greeting = character.greeting if greeting is None else greeting
@@ -304,6 +311,9 @@ class Session:
         #: A Room replaces voice-label guessing with who was actually loudest.
         self._attributor: Callable[[str], list[AttributedTurn]] | None = None
         self._last_player: str | None = player_id
+        self._last_input_unattributed = False
+        self._input_sequence = 0
+        self._audio_input: tuple[str | None, int] | None = None
 
         mode = (
             "off" if memory is False else "read" if memory == "read" else "read_write"
@@ -328,6 +338,7 @@ class Session:
             context=self._tool_context,
             on_event=self._tool_event,
         )
+        self._mcp = McpEvents()
         self._publisher = ContextPublisher(
             self._send_context,
             [character.context, self.context],
@@ -357,6 +368,10 @@ class Session:
         self._current: str | None = None
         self._cancelled: deque[str] = deque(maxlen=64)
         self._active: set[str] = set()
+        # Receipt eligibility belongs to this transport, independently of
+        # retained replies used to resume the conversation.
+        self._context_responses: dict[str, bool] = {}
+        self._context_saturated = False
         self._pending_continue: set[str] = set()
         self._item_waiters: dict[str, asyncio.Future[None]] = {}
         self._user_speaking = False
@@ -593,7 +608,9 @@ class Session:
         """Type into the conversation as the player, and (by default) ask for a reply."""
         self._require_live()
         self.transcript.append(("player", text))
+        self._input_sequence += 1
         self._last_player = self.player_id
+        self._last_input_unattributed = False
         party = self.character.party
         if party is not None:
             party.heard(
@@ -682,8 +699,13 @@ class Session:
         There is one speaker: a ``response.create`` while a reply is open waits
         in the runtime's single slot, and a newer request replaces a waiting
         one (``response_request_superseded``), so two quick lines get one
-        answer that has heard both.
+        answer that has heard both. Send pending live context first so this
+        request is composed against the latest application state.
         """
+        self._require_live()
+        await self._publisher.flush()
+        # Closing may have begun while the context sender held the transport.
+        self._require_live()
         await self._send(event)
 
     async def cue(self, event: str, instructions: str | None = None) -> None:
@@ -947,9 +969,35 @@ class Session:
             self._tools.disabled.discard(name)
         else:
             self._tools.disabled.add(name)
+        await self._update_session(self._tool_patch())
+
+    def _tool_patch(self) -> dict[str, Any]:
+        """The session's ``tools`` and ``tool_choice``: its functions, then the
+        character's MCP servers, which EESI runs and which are always restated
+        so a tools update never drops them."""
         specs = self._tools.specs()
-        await self._update_session(
-            {"tools": specs, "tool_choice": "auto" if specs else "none"}
+        servers = [server.to_wire() for server in self.character.mcp_servers]
+        return {
+            "tools": [*specs, *servers],
+            "tool_choice": "auto" if specs or servers else "none",
+        }
+
+    async def approve_mcp(self, request_id: str, approve: bool = True) -> None:
+        """Answer an ``mcp.approval.requested`` with the player's yes (or no).
+
+        The character asked out loud too; a spoken yes works without this. A
+        tool runs at most once per yes, with the arguments it asked about.
+        """
+        self._require_live()
+        await self._send(
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "mcp_approval_response",
+                    "approval_request_id": request_id,
+                    "approve": approve,
+                },
+            }
         )
 
     async def _update_session(self, patch: dict[str, Any]) -> None:
@@ -1007,6 +1055,8 @@ class Session:
                     ping_timeout=20,
                     close_timeout=3,
                 ) as ws:
+                    self._context_responses.clear()
+                    self._context_saturated = False
                     self._ws = ws
                     try:
                         async for raw in ws:
@@ -1201,9 +1251,29 @@ class Session:
 
     # ── server events ─────────────────────────────────────────────────────
 
+    def _context_response_state(self, rid: str, *, terminal: bool) -> None:
+        """Bound optional receipt bookkeeping without reopening terminal IDs."""
+        if self._context_saturated or not (
+            isinstance(rid, str)
+            and 0 < len(rid) <= 256
+            and rid == rid.strip()
+            and rid.isprintable()
+        ):
+            return
+        if rid not in self._context_responses and len(self._context_responses) >= 2048:
+            self._context_saturated = True
+            return
+        if terminal:
+            self._context_responses[rid] = False
+        elif rid not in self._context_responses:
+            self._context_responses[rid] = True
+
     async def _handle(self, event: dict[str, Any]) -> None:
         kind = wire.canonical_type(str(event.get("type") or ""))
         now = time.monotonic()
+        # Remote MCP servers EESI runs: watched, never answered here.
+        for mcp_event in self._mcp.read(kind, event):
+            self._emit(mcp_event)
         if kind == "eesi.recording_disclosure":
             disclosure = (
                 event.get("disclosure")
@@ -1264,23 +1334,62 @@ class Session:
                 self._emit(TranscriptPartial(text=text, item_id=event.get("item_id")))
         elif kind == "conversation.item.input_audio_transcription.completed":
             self._partial = ""
+            item_id = event.get("item_id")
+            owns_input = self._audio_owns_input(item_id)
             text = event.get("transcript")
             if isinstance(text, str) and text.strip():
-                self._on_user_turn(text.strip(), event.get("item_id"))
+                self._on_user_turn(text.strip(), item_id, owns_input=owns_input)
+            elif owns_input:
+                self._last_input_unattributed = True
+                self._last_player = None
+        elif kind == "conversation.item.input_audio_transcription.failed":
+            if self._audio_owns_input(event.get("item_id")):
+                self._last_input_unattributed = True
+                self._last_player = None
         elif kind == "response.created":
             rid = wire.response_id_of(event)
             if self._is_internal(event):
+                self._context_response_state(rid, terminal=True)
                 self._internal[rid] = []
                 return
             self._last_activity = now
-            response = self._responses.setdefault(rid, _Response(rid, now))
+            response = self._responses.setdefault(
+                rid,
+                _Response(
+                    rid,
+                    now,
+                    unattributed=self._last_input_unattributed,
+                    player_id=None
+                    if self._last_input_unattributed
+                    else self._last_player,
+                ),
+            )
             response.turn_ended_at = self._speech_stopped_at
             self._speech_stopped_at = None
             self._current = rid
             self._active.add(rid)
+            self._context_response_state(
+                rid,
+                terminal=response.done or response.cancelled or rid in self._cancelled,
+            )
             if self._initiative is not None:
                 self._initiative.response_started()
             self._emit(ResponseStarted(response_id=rid))
+        elif kind == "eesi.response_context":
+            receipt = ResponseContext._from_wire(event)
+            if (
+                receipt is not None
+                and receipt.response_id in self._active
+                and not self._context_saturated
+                and self._context_responses.get(receipt.response_id) is True
+                and not self._responses[receipt.response_id].done
+                and not self._responses[receipt.response_id].cancelled
+                and receipt.response_id not in self._cancelled
+                and receipt.response_id not in self._internal
+                and not self._closing
+                and not self._ended.is_set()
+            ):
+                self._emit(receipt)
         elif kind == "response.output_audio.delta":
             self._on_audio(event)
         elif kind in (
@@ -1294,9 +1403,17 @@ class Session:
                     self._internal[rid].append(delta)
                 return
             if isinstance(delta, str) and delta and rid not in self._cancelled:
-                self._responses.setdefault(rid, _Response(rid, now)).deltas.append(
-                    delta
-                )
+                self._responses.setdefault(
+                    rid,
+                    _Response(
+                        rid,
+                        now,
+                        unattributed=self._last_input_unattributed,
+                        player_id=None
+                        if self._last_input_unattributed
+                        else self._last_player,
+                    ),
+                ).deltas.append(delta)
                 self._emit(ResponseTextDelta(response_id=rid, text=delta))
         elif kind in (
             "response.output_audio_transcript.done",
@@ -1308,7 +1425,17 @@ class Session:
                 if isinstance(text, str) and text.strip():
                     self._internal[rid] = [text]
                 return
-            response = self._responses.setdefault(rid, _Response(rid, now))
+            response = self._responses.setdefault(
+                rid,
+                _Response(
+                    rid,
+                    now,
+                    unattributed=self._last_input_unattributed,
+                    player_id=None
+                    if self._last_input_unattributed
+                    else self._last_player,
+                ),
+            )
             text = (
                 event.get("transcript")
                 if kind.endswith("transcript.done")
@@ -1449,6 +1576,15 @@ class Session:
             self._emit(Reconnected(resumed=self._resumed))
 
     def _on_speech_started(self, event: dict[str, Any]) -> None:
+        item_id = event.get("item_id")
+        item_id = item_id if isinstance(item_id, str) and item_id else None
+        # Reopened speech can reuse an item ID. An ambiguous hard-interrupt
+        # notification also leaves future replies unknown until final STT;
+        # existing replies keep their immutable ownership snapshots.
+        self._input_sequence += 1
+        self._audio_input = (item_id, self._input_sequence)
+        self._last_input_unattributed = True
+        self._last_player = None
         interrupt = event.get("interrupt_response")
         audible = self._audible()
         self._user_speaking = True
@@ -1477,7 +1613,20 @@ class Session:
         ):
             self._cut(self._current, "barge_in")
 
-    def _on_user_turn(self, text: str, item_id: Any) -> None:
+    def _audio_owns_input(self, item_id: Any) -> bool:
+        """Only the current audio item may replace the current input's owner."""
+        item_id = item_id if isinstance(item_id, str) and item_id else None
+        # A control stream can deliver finals without speech-start. Once an
+        # audio item is tracked, require its ID and preserve any newer typed
+        # input; an unlabelled or older final cannot take that context back.
+        return self._audio_input is None or self._audio_input == (
+            item_id,
+            self._input_sequence,
+        )
+
+    def _on_user_turn(
+        self, text: str, item_id: Any, *, owns_input: bool = True
+    ) -> None:
         self.metrics.turns += 1
         if self._attributor is not None or self._roster is not None:
             attributed = (
@@ -1488,34 +1637,53 @@ class Session:
             turns = tuple(
                 SpeakerTurn(
                     text=a.text,
-                    speaker=a.speaker,
-                    player_id=self._player_ids.get(a.player or "", a.player),
+                    speaker=None if a.unattributed else a.speaker,
+                    player_id=None
+                    if a.unattributed
+                    else self._player_ids.get(a.player or "", a.player),
+                    unattributed=a.unattributed,
                 )
                 for a in attributed
             )
-            for turn in turns:
-                if turn.player_id:
-                    self._last_player = turn.player_id
             if self._roster is not None:
                 self._publisher.set_block(
                     "roster", self._roster.render(self._languages)
                 )
         else:
             turns = tuple(
-                SpeakerTurn(text=words, speaker=speaker, player_id=self.player_id)
-                for speaker, words in wire.split_speaker_turns(text)
+                SpeakerTurn(
+                    text=turn.text,
+                    speaker=turn.speaker,
+                    player_id=None if turn.unattributed else self.player_id,
+                    unattributed=turn.unattributed,
+                )
+                for turn in wire.parse_speaker_turns(text)
             )
+        if owns_input:
+            self._last_input_unattributed = any(turn.unattributed for turn in turns)
         for turn in turns:
+            if owns_input and turn.unattributed:
+                self._last_player = None
+            elif owns_input and turn.player_id:
+                self._last_player = turn.player_id
             label = (
-                "player"
-                if not self.players
-                else (self._name_of(turn.player_id) or f"Speaker {turn.speaker}")
+                "Unattributed voice"
+                if turn.unattributed
+                else (
+                    "player"
+                    if not self.players
+                    else (self._name_of(turn.player_id) or f"Speaker {turn.speaker}")
+                )
             )
+            if turn.unattributed:
+                self._memory_excluded_lines.add(len(self.transcript))
             self.transcript.append((label, turn.text))
             party = self.character.party
             if party is not None:
                 party.heard(
-                    self._name_of(turn.player_id) or "A player",
+                    "Unattributed voice"
+                    if turn.unattributed
+                    else (self._name_of(turn.player_id) or "A player"),
                     turn.text,
                     origin=self._origin,
                 )
@@ -1528,13 +1696,17 @@ class Session:
                 turns=turns,
             )
         )
+        recalled_text = "\n".join(turn.text for turn in turns if not turn.unattributed)
         if (
-            self.character.memory is not None
+            recalled_text
+            and self.character.memory is not None
             and self.character.memory.policy.recall_on_turn
             and self._memory_mode != "off"
         ):
             if self._memory_task is None or self._memory_task.done():
-                self._memory_task = self._spawn(self._recall_for(text), "memory")
+                self._memory_task = self._spawn(
+                    self._recall_for(recalled_text), "memory"
+                )
         if self.character.turn_taking == "app":
             loop = asyncio.get_running_loop()
             if self._reply_timer is not None:
@@ -1567,7 +1739,15 @@ class Session:
         if not isinstance(delta, str) or not delta:
             return
         pcm = base64.b64decode(delta)
-        response = self._responses.setdefault(rid, _Response(rid, time.monotonic()))
+        response = self._responses.setdefault(
+            rid,
+            _Response(
+                rid,
+                time.monotonic(),
+                unattributed=self._last_input_unattributed,
+                player_id=None if self._last_input_unattributed else self._last_player,
+            ),
+        )
         if not response.had_audio:
             response.had_audio = True
             response.first_audio_at = time.monotonic()
@@ -1615,6 +1795,7 @@ class Session:
         audible = self._audible()
         self._drop_audio(reason)
         if rid:
+            self._context_response_state(rid, terminal=True)
             if rid not in self._cancelled:
                 self._cancelled.append(rid)
             response = self._responses.get(rid)
@@ -1632,8 +1813,17 @@ class Session:
         rid = wire.response_id_of(event)
         status, reason = wire.response_status(event)
         self._last_activity = time.monotonic()
-        response = self._responses.setdefault(rid, _Response(rid, time.monotonic()))
+        response = self._responses.setdefault(
+            rid,
+            _Response(
+                rid,
+                time.monotonic(),
+                unattributed=self._last_input_unattributed,
+                player_id=None if self._last_input_unattributed else self._last_player,
+            ),
+        )
         self._active.discard(rid)
+        self._context_response_state(rid, terminal=True)
         response.done = True
         cut = status == "cancelled" or reason == "turn_detected"
         text = response.text()
@@ -1660,6 +1850,11 @@ class Session:
                 )
             )
         if text:
+            if response.unattributed:
+                # A reply can paraphrase the unknown person's facts. Snapshot
+                # this ownership when the response opens, not when it ends:
+                # another known person may already have started speaking.
+                self._memory_excluded_lines.add(len(self.transcript))
             self.transcript.append(
                 (self.character.name, text + (" [cut off]" if cut else ""))
             )
@@ -1667,7 +1862,9 @@ class Session:
             if party is not None and not cut:
                 party.said(
                     self.character.name,
-                    self._name_of(self._last_player) or "a player",
+                    "Unattributed voice"
+                    if response.unattributed
+                    else (self._name_of(response.player_id) or "a player"),
                     text,
                     origin=self._origin,
                 )
@@ -1703,7 +1900,7 @@ class Session:
         return ToolContext(
             session=self,
             character=self.character,
-            player_id=self._last_player or self.player_id,
+            player_id=self._last_player,
             call_id=call_id,
             arguments=arguments,
         )
@@ -1733,18 +1930,42 @@ class Session:
         if self._tools.seen(call_id):
             return
         rid = wire.response_id_of(event) or self._current or ""
-        response = self._responses.setdefault(rid, _Response(rid, time.monotonic()))
+        response = self._responses.setdefault(
+            rid,
+            _Response(
+                rid,
+                time.monotonic(),
+                unattributed=self._last_input_unattributed,
+                player_id=None if self._last_input_unattributed else self._last_player,
+            ),
+        )
         response.calls += 1
         response.outstanding.add(call_id)
         arguments = (
             event.get("arguments") if isinstance(event.get("arguments"), str) else "{}"
         )
-        self._spawn(self._run_tool(rid, call_id, name, arguments), f"tool:{name}")
+        self._spawn(
+            self._run_tool(rid, call_id, name, arguments, response.player_id),
+            f"tool:{name}",
+        )
 
     async def _run_tool(
-        self, rid: str, call_id: str, name: str, arguments: str
+        self, rid: str, call_id: str, name: str, arguments: str, player_id: str | None
     ) -> None:
-        outcome = await self._tools.run(call_id, name, arguments)
+        # This closure owns only this call. It survives permission/confirmation
+        # awaits without consulting a newer turn, and needs no retained map.
+        outcome = await self._tools.run(
+            call_id,
+            name,
+            arguments,
+            context=lambda current_call, values: ToolContext(
+                session=self,
+                character=self.character,
+                player_id=player_id,
+                call_id=current_call,
+                arguments=values,
+            ),
+        )
         if outcome.later is not None:
             self._follow(name, outcome.later)
         await self._send(wire.tool_output(call_id, outcome.output))
@@ -1935,9 +2156,13 @@ class Session:
         memory = self.character.memory
         if memory is None or not self._memory_writable or not memory.policy.extract:
             return
+        learnable = [
+            line
+            for index, line in enumerate(self.transcript)
+            if index not in self._memory_excluded_lines
+        ]
         if not any(
-            speaker not in ("event", self.character.name)
-            for speaker, _ in self.transcript
+            speaker not in ("event", self.character.name) for speaker, _ in learnable
         ):
             return
         targets: list[tuple[str, str | None]] = []
@@ -1951,7 +2176,7 @@ class Session:
                     "player" if (speaker == "player" or speaker == name) else speaker,
                     text,
                 )
-                for speaker, text in self.transcript
+                for speaker, text in learnable
             ]
             try:
                 added, superseded, forgotten = await asyncio.wait_for(

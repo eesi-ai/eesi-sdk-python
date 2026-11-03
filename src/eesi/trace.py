@@ -125,6 +125,7 @@ class Trace:
                     {
                         "speaker": t.speaker,
                         "player": t.player_id,
+                        **({"unattributed": True} if t.unattributed else {}),
                         **(
                             {"text": t.text} if self.content else {"chars": len(t.text)}
                         ),
@@ -192,6 +193,8 @@ class SessionMetrics:
 
 
 def _who(turn: dict[str, Any]) -> str:
+    if turn.get("unattributed"):
+        return "Unattributed voice"
     if turn.get("player"):
         return str(turn["player"])
     if turn.get("speaker"):

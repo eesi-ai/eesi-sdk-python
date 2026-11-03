@@ -322,7 +322,14 @@ class ToolRunner:
             self._seen.pop(next(iter(self._seen)))
         return False
 
-    async def run(self, call_id: str, name: str, raw_arguments: str) -> Outcome:
+    async def run(
+        self,
+        call_id: str,
+        name: str,
+        raw_arguments: str,
+        *,
+        context: Callable[[str, dict[str, Any]], ToolContext] | None = None,
+    ) -> Outcome:
         """Answer one call. Never raises."""
         started = time.monotonic()
         try:
@@ -360,7 +367,7 @@ class ToolRunner:
                 "invalid_arguments",
                 f"The arguments were not valid: {problems}.",
             )
-        ctx = self._context(call_id, arguments)
+        ctx = (context or self._context)(call_id, arguments)
         if item.allow is not None:
             try:
                 verdict = item.allow(ctx)

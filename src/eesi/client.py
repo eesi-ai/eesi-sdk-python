@@ -28,6 +28,7 @@ from . import audio as _audio
 from ._version import __version__
 from .character import Character
 from .errors import ConfigurationError, EESIError
+from .mcp import as_mcp_servers
 from .memory import InMemoryStore, LocalMemoryStore, Memory, MemoryPolicy
 
 log = logging.getLogger("eesi")
@@ -44,13 +45,8 @@ __all__ = [
 ]
 
 DEFAULT_BASE_URL = "https://api.eesi.ai"
-DEFAULT_MODEL = "nur-live-v1"
+DEFAULT_MODEL = "nur-v1"
 DEFAULT_MEMORY_DIR = ".eesi/memory"
-#: A sentence a designed voice is frozen from; it becomes the clone's ref_text.
-_DESIGN_SENTENCES = {
-    "en": "Every voice carries a story, and how we say it matters.",
-    "ar": "لكل صوت حكاية، وطريقة قولها لا تقل أهمية عن الكلمات.",
-}
 
 
 @dataclass(frozen=True)
@@ -69,8 +65,9 @@ class Voice:
 class VoiceDesign:
     """A voice described in words, created once in your organization's library and reused by name.
 
-    ``description`` uses the voice-design vocabulary (``GET /v1/audio/voice-design``),
-    e.g. ``"male, elderly, low pitch, british accent"``.
+    ``description`` is plain words in any language ("a calm older man with a
+    deep voice"), or the voice-design vocabulary
+    (``"male, elderly, low pitch, british accent"``).
     """
 
     name: str
@@ -213,7 +210,7 @@ class _AudioFactory:
 
 
 class NurClient:
-    """Characters on Nur Live.
+    """Characters on Nur.
 
     ``api_key`` defaults to ``EESI_API_KEY`` and ``base_url`` to
     ``EESI_API_URL`` (``https://api.eesi.ai``). Keep the key on a machine you
@@ -330,9 +327,11 @@ class NurClient:
         source: str | Path | dict[str, Any],
         *,
         tools: Sequence[Any] = (),
+        mcp_servers: Sequence[Any] = (),
         **overrides: Any,
     ) -> Character:
-        """A character saved with :meth:`Character.save`. Pass its ``tools`` again: functions are not saved."""
+        """A character saved with :meth:`Character.save`. Pass its ``tools`` and
+        ``mcp_servers`` again: functions and server tokens are not saved."""
         import json
 
         data = (
@@ -341,6 +340,7 @@ class NurClient:
             else json.loads(Path(source).read_text(encoding="utf-8"))
         )
         names = set(data.pop("tools", []) or [])
+        labels = set(data.pop("mcp_servers", []) or [])
         data.pop("format", None)
         data.pop("format_version", None)
         voice = data.get("voice")
@@ -355,8 +355,14 @@ class NurClient:
                 "loaded character expects tools you did not pass: %s",
                 ", ".join(sorted(missing)),
             )
+        servers = as_mcp_servers(mcp_servers)
+        if unserved := labels - {server.label for server in servers}:
+            log.warning(
+                "loaded character expects MCP servers you did not pass: %s",
+                ", ".join(sorted(unserved)),
+            )
         data.update(overrides)
-        return Character(self, tools=bound, **data)
+        return Character(self, tools=bound, mcp_servers=servers, **data)
 
     # ── REST ─────────────────────────────────────────────────────────────
 
@@ -452,47 +458,52 @@ class NurClient:
         return VoiceDesign(name=name, description=description, language=language)
 
     async def design_voice(
-        self, name: str, description: str, *, language: str = "en", wait: float = 60.0
+        self,
+        name: str,
+        description: str,
+        *,
+        language: str = "en",
+        wait: float = 60.0,
+        take: int = 0,
     ) -> Voice:
         """Create a voice from a description (or return the voice already named *name*).
 
-        The voice is synthesized once from the description, then saved to your
-        library like a clone, so it sounds the same in every session. It is a
-        synthetic voice: no person's recording is used.
+        The description can be plain words in any language ("a calm older man
+        with a deep voice") or the voice-design vocabulary. EESI makes takes of
+        it (``POST /v1/voices/design``), each a different speaker, and keeps
+        take number *take* as a voice in your library
+        (``POST /v1/voices/design/keep``), so it sounds the same in every
+        session. It is a synthetic voice: no person's recording is used, and
+        nothing is attested.
         """
         for item in await self.voices():
             if item.name.lower() == name.lower() and not item.is_builtin:
                 return item
-        sentence = _DESIGN_SENTENCES.get(language, _DESIGN_SENTENCES["en"])
-        speech = await self._request(
-            "POST",
-            "/audio/speech",
-            json={
-                "model": "nur-tts-v1",
-                "input": sentence,
-                "voice": "auto",
-                "instructions": description,
-                "language": language,
-                "response_format": "wav",
-            },
-        )
-        created = await self._request(
-            "POST",
-            "/voices",
-            files={"file": (f"{name}.wav", speech.content, "audio/wav")},
-            data={
-                "name": name,
-                # A designed voice is synthetic: no person's voice is cloned.
-                "consent_attested": "true",
-                "ref_text": sentence,
-                "language": language,
-                "category": "characters",
-                "description": f"Designed: {description}"[:500],
-            },
-        )
-        voice_id = created.json().get("voice_id")
+        designed = (
+            await self._request(
+                "POST",
+                "/voices/design",
+                json={"description": description, "language": language},
+            )
+        ).json()
+        takes = designed.get("takes") or []
+        if not takes:
+            raise EESIError(f"No takes of the voice {name!r} could be made.")
+        chosen = takes[min(max(take, 0), len(takes) - 1)]
+        created = (
+            await self._request(
+                "POST",
+                "/voices/design/keep",
+                json={
+                    "take_id": chosen["take_id"],
+                    "audio": chosen["audio"],
+                    "name": name,
+                },
+            )
+        ).json()
+        voice_id = created.get("voice_id")
         deadline = time.monotonic() + wait
-        status = created.json().get("status") or "processing"
+        status = created.get("status") or "processing"
         while status != "ready" and time.monotonic() < deadline:
             await asyncio.sleep(1.0)
             status = (await self._request("GET", f"/voices/{voice_id}")).json().get(
@@ -507,14 +518,16 @@ class NurClient:
             is_builtin=False,
             status=status,
             language=language,
-            description=description,
+            gender=created.get("gender"),
+            category=created.get("category"),
+            description=created.get("description") or description,
         )
 
     async def chat(
         self,
         messages: list[dict[str, Any]],
         *,
-        model: str = "nur-llm-v1",
+        model: str = "nur-v1",
         temperature: float = 0.2,
         max_tokens: int = 900,
         json_output: bool = True,

@@ -1,6 +1,6 @@
 """The wire: client events the SDK sends and the server events it reads.
 
-Nur Live speaks the OpenAI Realtime protocol plus a few ``eesi.*`` events
+Nur speaks the OpenAI Realtime protocol plus a few ``eesi.*`` events
 (https://docs.eesi.ai/realtime/live). The builders here are plain dicts so a
 trace shows exactly what went out. Server event names have aliases across
 protocol versions; :func:`canonical_type` collapses them to one name, as every
@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 #: The gateway's native input rate: 16-bit mono PCM unless the session says otherwise.
@@ -21,11 +22,24 @@ OUTPUT_SAMPLE_RATE = 24_000
 
 #: Limits the gateway enforces on context blocks, tool results and instructions.
 MAX_CONTEXT_KEYS = 8
-MAX_CONTEXT_BLOCK_BYTES = 8_000
-MAX_CONTEXT_TOTAL_BYTES = 24_000
+MAX_CONTEXT_BLOCK_BYTES = 200_000
+MAX_CONTEXT_TOTAL_BYTES = 256_000
 MAX_TOOL_RESULT_BYTES = 16_000
 MAX_INSTRUCTIONS_BYTES = 64_000
 CONTEXT_KEY = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,47}$")
+
+#: How the voice says a phrase (``session.replace``): this many phrases at most,
+#: each this long (letters, digits, apostrophes, spaces), said as at most this many characters.
+MAX_PRONUNCIATIONS = 200
+MAX_PRONUNCIATION_PHRASE_CHARS = 100
+MAX_PRONUNCIATION_SPOKEN_CHARS = 128
+#: Words the transcript should expect (``audio.input.transcription.keyterms``).
+MAX_KEYTERMS = 100
+MAX_KEYTERM_CHARS = 50
+#: ``audio.input.transport`` / ``audio.output.transport``: base64 in JSON, or binary frames.
+AUDIO_TRANSPORTS = ("json", "binary")
+#: The longest line a ``force_message`` says word for word.
+MAX_SCRIPTED_LINE_CHARS = 4_096
 
 _ALIASES = {
     "response.audio.delta": "response.output_audio.delta",
@@ -73,6 +87,33 @@ def user_text(text: str, *, item_id: str | None = None) -> dict[str, Any]:
     if item_id:
         item["id"] = item_id
     return {"type": "conversation.item.create", "item": item}
+
+
+def force_message(
+    text: str, *, interruptible: bool = True, item_id: str | None = None
+) -> dict[str, Any]:
+    """A line the voice says word for word, without the model: it is the turn,
+    so no ``response.create`` follows. With *interruptible* false, nobody can
+    talk over it."""
+    item: dict[str, Any] = {
+        "type": "force_message",
+        "role": "assistant",
+        "interruptible": interruptible,
+        "content": [{"type": "output_text", "text": text}],
+    }
+    if item_id:
+        item["id"] = item_id
+    return {"type": "conversation.item.create", "item": item}
+
+
+def clear_input_audio() -> dict[str, Any]:
+    """Drop the audio turn detection has not picked up yet."""
+    return {"type": "input_audio_buffer.clear"}
+
+
+def delete_item(item_id: str) -> dict[str, Any]:
+    """Take an item out of what the character reads next."""
+    return {"type": "conversation.item.delete", "item_id": item_id}
 
 
 def tool_output(call_id: str, output: str) -> dict[str, Any]:
@@ -212,15 +253,27 @@ def response_status(event: dict[str, Any]) -> tuple[str | None, str | None]:
 
 
 SPEAKER_LINE = re.compile(r"^\s*speaker\s+(\d+)\s*:\s*(.*)$", re.IGNORECASE)
+UNATTRIBUTED_LINE = re.compile(r"^\s*unattributed voice\s*:\s*(.*)$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ParsedSpeakerTurn:
+    speaker: int | None
+    text: str
+    unattributed: bool = False
 
 
 def split_speaker_turns(text: str) -> list[tuple[int | None, str]]:
-    """``Speaker N:`` tagged lines back into (speaker, text) runs.
+    """Compatibility view of parsed runs as ``(speaker, text)`` pairs.
 
-    An untagged line continues whoever spoke last, and a transcript with no
-    tags is one unattributed turn. Nur Live tags lines once a session has
-    heard a second voice.
+    Attribution consumers must use :func:`parse_speaker_turns` to distinguish
+    explicitly unknown voices from ordinary unlabelled solo transcripts.
     """
+    return [(turn.speaker, turn.text) for turn in parse_speaker_turns(text)]
+
+
+def parse_speaker_turns(text: str) -> list[ParsedSpeakerTurn]:
+    """Tagged runs, preserving explicit unknown identity as its own boundary."""
     trimmed = text.strip()
     if not trimmed:
         return []
@@ -233,10 +286,18 @@ def split_speaker_turns(text: str) -> list[tuple[int | None, str]]:
         number = int(match.group(1))
         return number if number >= 1 else None
 
-    if not any(speaker_of(line) is not None for line in lines):
-        return [(None, trimmed)]
+    if not any(
+        speaker_of(line) is not None or UNATTRIBUTED_LINE.match(line) for line in lines
+    ):
+        return [ParsedSpeakerTurn(None, trimmed)]
     turns: list[list[Any]] = []
     for line in lines:
+        unknown = UNATTRIBUTED_LINE.match(line)
+        if unknown:
+            # Two unknown markers need not be the same voice. A following
+            # untagged continuation still belongs to this particular run.
+            turns.append([None, unknown.group(1).strip(), True])
+            continue
         match = SPEAKER_LINE.match(line)
         speaker = speaker_of(line)
         body = (match.group(2) if match and speaker is not None else line).strip()
@@ -244,15 +305,19 @@ def split_speaker_turns(text: str) -> list[tuple[int | None, str]]:
             if turns and turns[-1][0] == speaker:
                 turns[-1][1] = f"{turns[-1][1]} {body}".strip()
             else:
-                turns.append([speaker, body])
+                turns.append([speaker, body, False])
             continue
         if not body:
             continue
         if turns:
             turns[-1][1] = f"{turns[-1][1]} {body}".strip()
         else:
-            turns.append([None, body])
-    return [(speaker, words) for speaker, words in turns if words]
+            turns.append([None, body, False])
+    return [
+        ParsedSpeakerTurn(speaker, words, unknown)
+        for speaker, words, unknown in turns
+        if words
+    ]
 
 
 def clip_bytes(text: str, limit: int) -> str:

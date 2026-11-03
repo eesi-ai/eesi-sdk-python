@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -45,12 +46,19 @@ __all__ = [
     "ErrorEvent",
     "Feedback",
     "Hangup",
+    "McpApprovalRequested",
+    "McpCallCompleted",
+    "McpCallFailed",
+    "McpCallStarted",
+    "McpToolsFailed",
+    "McpToolsListed",
     "MemoryRetrieved",
     "MemoryUpdated",
     "Reconnected",
     "Reconnecting",
     "ResponseCancelled",
     "ResponseCompleted",
+    "ResponseContext",
     "ResponseStarted",
     "ResponseTextDelta",
     "SessionEnded",
@@ -118,10 +126,12 @@ class SpeakerTurn:
     """One person's part of a transcript several voices share."""
 
     text: str
-    #: ``Speaker N`` as the transcript tagged it; None when there was one voice.
+    #: ``Speaker N`` as tagged; None for unlabelled or explicitly unknown voice.
     speaker: int | None = None
     #: The player the SDK attributes it to, when it knows.
     player_id: str | None = None
+    #: The recognizer explicitly could not identify this voice. Never a solo fallback.
+    unattributed: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -147,6 +157,73 @@ class TranscriptFinal(Event):
 class ResponseStarted(Event):
     type: ClassVar[str] = "response.started"
     response_id: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResponseContext(Event):
+    """Optional staff-visible hash of serialized input sent to the provider.
+
+    No prompt or tool output is retained. This is a request receipt, not proof
+    of compliance, completed generation or audible playback. Ordinary routes
+    may withhold it; absence establishes nothing about the response's context.
+    """
+
+    type: ClassVar[str] = "response.context"
+    response_id: str = ""
+    receipt_id: str = ""
+    input_sha256: str = ""
+    provider_format: str = ""
+    model: str = ""
+    item_count: int = 0
+    coverage: str = "serialized_provider_input"
+    turn_id: str | None = None
+    turn_revision: int | None = None
+
+    @classmethod
+    def _from_wire(cls, value: dict[str, Any]) -> ResponseContext | None:
+        def text(value: Any) -> bool:
+            return (
+                isinstance(value, str)
+                and 0 < len(value) <= 256
+                and value == value.strip()
+                and value.isprintable()
+            )
+
+        receipt = value.get("receipt")
+        if (
+            value.get("type") != "eesi.response_context"
+            or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 1
+            or value.get("status") != "provider_started"
+            or not isinstance(receipt, dict)
+            or receipt.get("coverage") != "serialized_provider_input"
+            or not text(value.get("response_id"))
+            or any(not text(receipt.get(k)) for k in ("receipt_id", "model"))
+            or not isinstance(receipt.get("input_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", receipt["input_sha256"]) is None
+            or receipt.get("provider_format") not in ("chat_completions", "responses")
+            or type(receipt.get("item_count")) is not int
+            or not 0 <= receipt["item_count"] < 2**53
+            or (value.get("turn_id") is not None and not text(value["turn_id"]))
+            or (
+                value.get("turn_revision") is not None
+                and (
+                    type(value["turn_revision"]) is not int
+                    or not 0 <= value["turn_revision"] < 2**53
+                )
+            )
+        ):
+            return None
+        return cls(
+            response_id=value["response_id"],
+            receipt_id=receipt["receipt_id"],
+            input_sha256=receipt["input_sha256"],
+            provider_format=receipt["provider_format"],
+            model=receipt["model"],
+            item_count=receipt["item_count"],
+            turn_id=value.get("turn_id"),
+            turn_revision=value.get("turn_revision"),
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -253,6 +330,78 @@ class ToolFailed(Event):
     #: ``not_confirmed``, ``timeout`` or ``duplicate``.
     reason: str = "exception"
     error: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpToolsListed(Event):
+    """EESI listed a remote MCP server's tools; the character can use them now."""
+
+    type: ClassVar[str] = "mcp.tools.listed"
+    server_label: str = ""
+    #: The tools the character was offered, by the server's own names.
+    tools: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpToolsFailed(Event):
+    """A remote MCP server could not be listed; the character goes on without it."""
+
+    type: ClassVar[str] = "mcp.tools.failed"
+    server_label: str = ""
+    #: ``not_public``, ``unreachable``, ``unauthorized``, ``timeout``,
+    #: ``http_error``, ``protocol_error`` or ``redirect``.
+    code: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpCallStarted(Event):
+    """The character called a remote MCP tool; EESI is running it."""
+
+    type: ClassVar[str] = "mcp.call.started"
+    item_id: str = ""
+    server_label: str = ""
+    name: str = ""
+    #: The arguments, as JSON text.
+    arguments: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpCallCompleted(Event):
+    type: ClassVar[str] = "mcp.call.completed"
+    item_id: str = ""
+    server_label: str = ""
+    name: str = ""
+    arguments: str = ""
+    #: What the server returned, as the character read it.
+    output: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpCallFailed(Event):
+    type: ClassVar[str] = "mcp.call.failed"
+    item_id: str = ""
+    server_label: str = ""
+    name: str = ""
+    arguments: str = ""
+    #: ``http_error``, ``protocol_error`` or ``tool_execution_error``.
+    kind: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True, kw_only=True)
+class McpApprovalRequested(Event):
+    """A tool that changes things waits for the player's yes.
+
+    The character asks out loud; a yes from the player runs it. A button in
+    your UI answers with :meth:`Session.approve_mcp` and ``request_id``.
+    """
+
+    type: ClassVar[str] = "mcp.approval.requested"
+    request_id: str = ""
+    server_label: str = ""
+    name: str = ""
+    arguments: str = ""
 
 
 @dataclass(frozen=True, kw_only=True)

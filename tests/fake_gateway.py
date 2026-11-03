@@ -1,4 +1,4 @@
-"""A Nur Live gateway stand-in for SDK tests: a real WebSocket server, scripted by the test.
+"""A Nur gateway stand-in for SDK tests: a real WebSocket server, scripted by the test.
 
 It greets like the gateway (recording disclosure, ``eesi.session`` with a
 resume token, ``session.created``), answers every ``session.update`` with
@@ -92,7 +92,7 @@ class FakeGateway:
             json.dumps(
                 {
                     "type": "session.created",
-                    "session": {"id": "sess_1", "model": "nur-live-v1"},
+                    "session": {"id": "sess_1", "model": "nur-v1"},
                 }
             )
         )

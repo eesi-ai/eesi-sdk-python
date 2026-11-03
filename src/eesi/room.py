@@ -7,7 +7,7 @@ everyone, so it can talk to the group, answer two people at once and greet
 whoever walks up.
 
 Who said what comes from the audio itself. The room knows which player was
-loudest while each turn was spoken, and binds Nur Live's ``Speaker N``
+loudest while each turn was spoken, and binds Nur's ``Speaker N``
 labels to players by that, so it does not depend on people introducing
 themselves::
 
@@ -31,7 +31,7 @@ import time
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from ._protocol import INPUT_SAMPLE_RATE, split_speaker_turns
+from ._protocol import INPUT_SAMPLE_RATE, parse_speaker_turns
 from .audio import Resampler
 from .events import Event
 from .multiplayer import AttributedTurn, Player, as_players
@@ -231,13 +231,11 @@ class Room:
 
     def _after_turn(self, event: Event) -> None:
         turns = getattr(event, "turns", ())
-        named = [
-            self._name(turn.player_id) or turn.player_id
-            for turn in turns
-            if turn.player_id
-        ]
-        if named:
-            self._last_speaker = named[-1]
+        for turn in turns:
+            if turn.unattributed:
+                self._last_speaker = None
+            elif turn.player_id:
+                self._last_speaker = self._name(turn.player_id) or turn.player_id
         self.session._publisher.set_block("roster", self.render())
 
     def _restart_timeline(self, _event: Event) -> None:
@@ -272,7 +270,15 @@ class Room:
         ranking = self.loudest(*self.session.speech_window)
         roster = self.session._roster
         turns: list[AttributedTurn] = []
-        for speaker, words in split_speaker_turns(text):
+        for turn in parse_speaker_turns(text):
+            speaker, words = turn.speaker, turn.text
+            if turn.unattributed:
+                turns.append(
+                    AttributedTurn(
+                        text=words, speaker=None, player=None, unattributed=True
+                    )
+                )
+                continue
             if speaker is None:
                 key = ranking[0] if ranking else None
             else:

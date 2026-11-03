@@ -9,7 +9,7 @@
     print(result.metrics["latency_p50"])
 
 A scripted player speaks lines synthesized by EESI's own text to speech, with
-pauses between them, into a real Nur Live session, in real time. Everything
+pauses between them, into a real Nur session, in real time. Everything
 the character does is collected. This exercises the whole path (speech
 recognition, turn-taking, the model, tools, memory), so it costs usage like
 any session and its results vary the way a model's do: assert on what must
@@ -50,7 +50,7 @@ async def _speak(
         "POST",
         "/audio/speech",
         json={
-            "model": "nur-tts-v1",
+            "model": "nur-v1",
             "input": text,
             "voice": voice_id,
             "language": language,

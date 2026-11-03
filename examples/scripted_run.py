@@ -4,7 +4,7 @@
     python examples/scripted_run.py --record kael.wav --trace kael.jsonl
 
 A scripted player (EESI text to speech, Nova's voice) says each line into a
-real Nur Live session with a pause after it, the character answers, and the
+real Nur session with a pause after it, the character answers, and the
 run checks what must hold: the tool was called, and in a second session the
 character remembers the player. Exits 1 when a check fails. Results vary the
 way a model's do, so it checks behaviour, never exact words.

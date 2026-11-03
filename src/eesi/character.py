@@ -28,6 +28,7 @@ from .multiplayer import PartyLog
 from .presets import PRESETS, Preset
 from .proactive import Proactive, Trigger
 from .session import Session
+from .mcp import McpServer, as_mcp_servers
 from .tools import Tool, as_tools, tool
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ __all__ = ["Character", "TurnTaking"]
 
 #: Who decides when the character speaks.
 #:
-#: - ``natural`` (default): Nur Live's own full-duplex floor control. It
+#: - ``natural`` (default): Nur's own full-duplex floor control. It
 #:   listens while it speaks, decides when a turn has ended, backchannels,
 #:   and yields when cut off. Context and memory recalled during a turn reach
 #:   the next reply.
@@ -150,6 +151,7 @@ class Character:
         greeting: bool | str | None = None,
         verbosity: Verbosity | None = None,
         tools: Sequence[Tool | Callable[..., Any]] = (),
+        mcp_servers: Sequence[McpServer | dict[str, Any]] = (),
         context: dict[str, Any] | None = None,
         memory: bool | str | Path | Memory | MemoryStore | None = None,
         party: bool | None = None,
@@ -235,6 +237,8 @@ class Character:
         )
         self.triggers: list[Trigger] = []
         self.tools: list[Tool] = as_tools(tools)
+        #: Remote MCP servers EESI connects to and runs for this character.
+        self.mcp_servers: list[McpServer] = as_mcp_servers(mcp_servers)
         self.context = LiveContext("world")
         self._initial_context = dict(context or {})
         use_party = defaults.get("party", False) if party is None else party
@@ -438,7 +442,7 @@ class Character:
             words.append(session.player_name)
         prompt = ", ".join(dict.fromkeys(word for word in words if word))
         transcription: dict[str, Any] = {"prompt": prompt}
-        specs = session._tools.specs()
+        tools = session._tool_patch()
         config: dict[str, Any] = {
             "instructions": instructions,
             "audio": {
@@ -448,8 +452,7 @@ class Character:
                     "transcription": transcription,
                 },
             },
-            "tools": specs,
-            "tool_choice": "auto" if specs else "none",
+            **tools,
         }
         if pinned is not None:
             code, name = pinned
@@ -620,11 +623,8 @@ class Character:
             for session in list(self._sessions):
                 session._tools.tools[made.name] = made
                 if session.ready:
-                    specs = session._tools.specs()
                     asyncio.ensure_future(
-                        session._update_session(
-                            {"tools": specs, "tool_choice": "auto" if specs else "none"}
-                        )
+                        session._update_session(session._tool_patch())
                     )
             return made
 
@@ -782,6 +782,8 @@ class Character:
         """The character as JSON-ready data. Tools are listed by name; memory is not included."""
         data = dict(self._definition().__dict__)
         data["tools"] = [t.name for t in self.tools]
+        # By label: a server's address and token are not saved with the character.
+        data["mcp_servers"] = [server.label for server in self.mcp_servers]
         data["context"] = self.context.get("world")
         data["format"] = "eesi.character"
         data["format_version"] = 1
@@ -799,10 +801,11 @@ class Character:
         options: dict[str, Any] = {
             k: v
             for k, v in data.items()
-            if k not in ("tools", "format", "format_version", "party")
+            if k not in ("tools", "mcp_servers", "format", "format_version", "party")
         }
         options["party"] = self.party is not None
         options["tools"] = self.tools
+        options["mcp_servers"] = self.mcp_servers
         options["memory"] = self.memory.memory if self.memory else None
         options["voice"] = self.voice
         options["proactive"] = self.proactive

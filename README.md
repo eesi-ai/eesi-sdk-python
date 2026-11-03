@@ -1,6 +1,6 @@
 # EESI for Python
 
-Characters you can talk to, in real time, on [Nur Live](https://docs.eesi.ai/realtime/live):
+Characters you can talk to, in real time, on [Nur](https://docs.eesi.ai/realtime/live):
 a persona, a voice, tools, live state from your game or app, and long memory of
 every player. Plus a typed client for the rest of the EESI API.
 
@@ -59,7 +59,7 @@ characters) and `from eesi import EESIClient` (the REST API). The PyPI release
 
 ## What you get
 
-- **Real speech to speech.** Nur Live listens while it speaks, decides when a
+- **Real speech to speech.** Nur listens while it speaks, decides when a
   turn has ended, backchannels, and stops when someone cuts in. The SDK drops
   the character's queued audio the moment it is cut off.
 - **Characters, not prompts.** Persona, traits, speaking style, goals,
@@ -116,6 +116,24 @@ async def talk(player_id: str) -> None:
         await session.run()
 ```
 
+## Events and traces
+
+An optional `response.context` event (`ResponseContext` from `eesi.events`)
+projects a staff-visible server receipt into metadata only: `response_id`,
+`receipt_id`, `input_sha256`, `provider_format` (`responses` or
+`chat_completions`), `model`, `item_count`, `coverage`
+(`serialized_provider_input`), and independently nullable `turn_id` and
+`turn_revision`. It retains no words, tool payloads or credentials. Gateway
+privacy is unchanged; ordinary customer routes withhold these receipts.
+
+The SDK emits receipts only for known, unfinished public responses on the
+current connection that have not been cancelled. It tracks at most 2,048
+response IDs per connection; overflow suppresses receipts until reconnect.
+A missing receipt leaves coverage unknown. The hash proves coverage of the
+exact serialized input passed to the text-model SDK, excluding HTTP bytes,
+sampling parameters and TTS settings. It does not establish compliance,
+acting quality, audible playback or approval to publish.
+
 ## Browsers and game clients
 
 Your API key stays on your server. A browser or a game build gets a client
@@ -169,6 +187,25 @@ Claude Code: `/plugin marketplace add eesi-ai/eesi-sdk-python`, then
 "codex-notify"]` in `~/.codex/config.toml`. The whole guide:
 [Coding companion](https://docs.eesi.ai/realtime/coding-companion).
 
+## Nur as your team's engineering assistant
+
+Talk to Nur about your code; Claude Code does the work on your own computer.
+`eesi engineer` runs Claude Code through the Claude Agent SDK: it takes the
+tasks you hand Nur (in a call, or from the console), each in a git worktree
+and `nur/` branch of its own, plans first, asks a person before anything
+outside a task's reach (it never pushes or deploys), runs your checks, and
+reports what changed according to git beside what Claude says it did. It
+also tells Nur about the Claude Code sessions you ran yourself, as redacted
+digests, so she can answer "what did Claude do yesterday?".
+
+```bash
+uv tool install "eesi-sdk[engineer] @ git+https://github.com/eesi-ai/eesi-sdk-python"
+eesi engineer setup --api-key sk-eesi-... --repo ~/code/app --check "make test"
+eesi engineer start              # take Nur's tasks; report sessions and commits
+```
+
+Claude Code must be signed in on that computer (`claude`, or `claude setup-token`).
+
 ## Guides and examples
 
 - The guide: [docs.eesi.ai/realtime/characters](https://docs.eesi.ai/realtime/characters)
@@ -193,7 +230,7 @@ with EESIClient() as client:
 
 ```bash
 python -m pytest tests -q                         # unit tests and a local fake gateway
-EESI_API_KEY=... EESI_LIVE_TESTS=1 python -m pytest tests/test_nur_live.py   # real Nur Live sessions
+EESI_API_KEY=... EESI_LIVE_TESTS=1 python -m pytest tests/test_nur_live.py   # real Nur sessions
 ```
 
 The first set proves what the SDK sends and how it reacts; it cannot prove

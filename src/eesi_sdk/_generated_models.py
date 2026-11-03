@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+from datetime import date as date_aliased
 from enum import Enum
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, Field, RootModel
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
 
 
 class APIKeyResponse(BaseModel):
@@ -54,11 +56,11 @@ class BodyCreateTranscriptionV1AudioTranscriptionsPost(BaseModel):
         Field(alias="timestamp_granularities[]", title="Timestamp Granularities[]"),
     ] = None
     stream: Annotated[bool | None, Field(title="Stream")] = False
+    store: Annotated[bool | None, Field(title="Store")] = True
 
 
 class Engine(Enum):
-    nur_tts_v1 = "nur-tts-v1"
-    omnivoice = "omnivoice"
+    nur_v1 = "nur-v1"
 
 
 class Category(Enum):
@@ -101,7 +103,7 @@ class BodyCreateVoiceV1VoicesPost(BaseModel):
     name: Annotated[str, Field(max_length=255, min_length=1, title="Name")]
     consent_attested: Annotated[bool | None, Field(title="Consent Attested")] = False
     ref_text: Annotated[str | None, Field(title="Ref Text")] = None
-    engine: Annotated[Engine | None, Field(title="Engine")] = Engine.nur_tts_v1
+    engine: Annotated[Engine | None, Field(title="Engine")] = Engine.nur_v1
     category: Annotated[Category | None, Field(title="Category")] = Category.general
     description: Annotated[Description | None, Field(title="Description")] = None
     language: Annotated[Language | None, Field(title="Language")] = None
@@ -118,36 +120,6 @@ class BodySeparateReferenceClipV1VoicesSeparatePost(BaseModel):
             title="File",
         ),
     ]
-
-
-class BundleScorecard(BaseModel):
-    """
-    One runtime bundle's sessions in the window, and how they went.
-
-    Every number here is what the runtime measured, not a judge's opinion:
-    how sessions ended, how much evidence they left, how long replies took,
-    and which deterministic failure signals were raised. Coverage travels
-    with the rates so a percentage over sessions with no transcript is never
-    mistaken for a percentage over the truth.
-    """
-
-    digest: Annotated[str, Field(title="Digest")]
-    bundle: Annotated[dict[str, Any] | None, Field(title="Bundle")] = None
-    sessions: Annotated[int, Field(title="Sessions")]
-    first_seen: Annotated[AwareDatetime | None, Field(title="First Seen")] = None
-    last_seen: Annotated[AwareDatetime | None, Field(title="Last Seen")] = None
-    ended_by_error: Annotated[int, Field(title="Ended By Error")]
-    ended_by_limit: Annotated[int, Field(title="Ended By Limit")]
-    with_transcript: Annotated[int, Field(title="With Transcript")]
-    with_journal: Annotated[int, Field(title="With Journal")]
-    turns: Annotated[int, Field(title="Turns")]
-    reply_p50_ms: Annotated[float | None, Field(title="Reply P50 Ms")] = None
-    reply_p95_ms: Annotated[float | None, Field(title="Reply P95 Ms")] = None
-    barge_ins: Annotated[int, Field(title="Barge Ins")]
-    failures: Annotated[int, Field(title="Failures")]
-    open_failures: Annotated[int, Field(title="Open Failures")]
-    by_severity: Annotated[dict[str, int], Field(title="By Severity")]
-    by_signal: Annotated[dict[str, int], Field(title="By Signal")]
 
 
 class Tools(Enum):
@@ -303,6 +275,8 @@ class GenerationResponse(BaseModel):
     language: Annotated[str | None, Field(title="Language")] = None
     instructions: Annotated[str | None, Field(title="Instructions")] = None
     source: Annotated[str | None, Field(title="Source")] = None
+    part: Annotated[str | None, Field(title="Part")] = None
+    part_label: Annotated[str | None, Field(title="Part Label")] = None
     created_at: Annotated[str | None, Field(title="Created At")] = None
     audio_bytes: Annotated[int | None, Field(title="Audio Bytes")] = None
     audio_truncated: Annotated[bool | None, Field(title="Audio Truncated")] = False
@@ -310,50 +284,29 @@ class GenerationResponse(BaseModel):
     has_audio: Annotated[bool | None, Field(title="Has Audio")] = False
 
 
-class InteractionFailure(BaseModel):
-    id: Annotated[str, Field(title="Id")]
-    session_id: Annotated[str, Field(title="Session Id")]
-    signal: Annotated[str, Field(title="Signal")]
-    severity: Annotated[str, Field(title="Severity")]
-    confidence: Annotated[float, Field(title="Confidence")]
-    rank: Annotated[float, Field(title="Rank")]
-    turn_index: Annotated[int | None, Field(title="Turn Index")] = None
-    evidence: Annotated[dict[str, Any] | None, Field(title="Evidence")] = None
-    detector_version: Annotated[str, Field(title="Detector Version")]
-    runtime_bundle_digest: Annotated[
-        str | None, Field(title="Runtime Bundle Digest")
-    ] = None
-    status: Annotated[str, Field(title="Status")]
-    notes: Annotated[str | None, Field(title="Notes")] = None
-    owner_user_id: Annotated[int | None, Field(title="Owner User Id")] = None
-    created_at: Annotated[AwareDatetime, Field(title="Created At")]
-    updated_at: Annotated[AwareDatetime, Field(title="Updated At")]
+class KeepDesignedVoiceRequest(BaseModel):
+    """
+    One take from POST /v1/voices/design, sent back exactly as it came.
+    """
+
+    take_id: Annotated[str, Field(max_length=8192, title="Take Id")]
+    audio: Annotated[str, Field(max_length=4194304, title="Audio")]
+    name: Annotated[str, Field(max_length=255, min_length=1, title="Name")]
+    category: Annotated[Category | None, Field(title="Category")] = Category.characters
 
 
-class InteractionFailureList(BaseModel):
-    items: Annotated[list[InteractionFailure], Field(title="Items")]
-    total: Annotated[int, Field(title="Total")]
-    limit: Annotated[int, Field(title="Limit")]
-    offset: Annotated[int, Field(title="Offset")]
-    counts: Annotated[dict[str, int] | None, Field(title="Counts")] = None
+class LatencyBin(BaseModel):
+    """
+    One bar of the fine distribution, on a log scale of milliseconds.
 
+    Lower exclusive, upper inclusive, like :class:`LatencyBucket`. The first
+    bin starts at 0 and the last has no upper bound (null is infinity), so the
+    bins together count every measured turn exactly once.
+    """
 
-class Status(Enum):
-    open = "open"
-    triaged = "triaged"
-    reproduced = "reproduced"
-    fixed = "fixed"
-    dismissed = "dismissed"
-    invalid = "invalid"
-
-
-class Notes(RootModel[str]):
-    root: Annotated[str, Field(max_length=4000, title="Notes")]
-
-
-class InteractionFailureUpdate(BaseModel):
-    status: Annotated[Status | None, Field(title="Status")] = None
-    notes: Annotated[Notes | None, Field(title="Notes")] = None
+    lower_ms: Annotated[float, Field(title="Lower Ms")]
+    upper_ms: Annotated[float | None, Field(title="Upper Ms")]
+    count: Annotated[int, Field(title="Count")]
 
 
 class LatencyBucket(BaseModel):
@@ -363,6 +316,17 @@ class LatencyBucket(BaseModel):
 
     upper_ms: Annotated[int | None, Field(title="Upper Ms")]
     count: Annotated[int, Field(title="Count")]
+
+
+class LatencyDay(BaseModel):
+    """
+    One UTC day of measured turns; null percentiles when none was timed.
+    """
+
+    day: Annotated[date_aliased, Field(title="Day")]
+    measured: Annotated[int, Field(title="Measured")]
+    p50_ms: Annotated[float | None, Field(title="P50 Ms")] = None
+    p95_ms: Annotated[float | None, Field(title="P95 Ms")] = None
 
 
 class Name(RootModel[str]):
@@ -412,15 +376,38 @@ class ListenerEvents(BaseModel):
     data: Annotated[list[ListenerEvent], Field(title="Data")]
 
 
-class Status1(Enum):
+class PhoneAdmissionConfiguration(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    phone_number_id: Annotated[int, Field(gt=0, title="Phone Number Id")]
+    url: Annotated[str, Field(max_length=2048, title="Url")]
+    secret: Annotated[str, Field(max_length=256, min_length=32, title="Secret")]
+
+
+class PhoneAdmissionStatus(BaseModel):
+    phone_number_id: Annotated[int, Field(title="Phone Number Id")]
+    enabled: Annotated[bool, Field(title="Enabled")]
+
+
+class Status(Enum):
+    dispatching = "dispatching"
     dialing = "dialing"
     in_progress = "in_progress"
     completed = "completed"
     not_answered = "not_answered"
+    unknown = "unknown"
+    failed = "failed"
+    cancelled = "cancelled"
+    voicemail = "voicemail"
 
 
 class Voice(RootModel[str]):
     root: Annotated[str, Field(max_length=128, title="Voice")]
+
+
+class EndAt(RootModel[int]):
+    root: Annotated[int, Field(gt=0, title="End At")]
 
 
 class PhoneCallRequest(BaseModel):
@@ -435,6 +422,17 @@ class PhoneCallRequest(BaseModel):
     greeting: Annotated[Greeting | None, Field(title="Greeting")] = None
     voice: Annotated[Voice | None, Field(title="Voice")] = None
     metadata: Annotated[dict[str, str] | None, Field(title="Metadata")] = None
+    request_id: Annotated[UUID | None, Field(title="Request Id")] = None
+    max_duration_seconds: Annotated[
+        int | None, Field(ge=30, le=28800, title="Max Duration Seconds")
+    ] = 1800
+    end_at: Annotated[EndAt | None, Field(title="End At")] = None
+    record_audio: Annotated[bool | None, Field(title="Record Audio")] = False
+    train: Annotated[bool | None, Field(title="Train")] = False
+    answering_machine_detection: Annotated[
+        bool | None, Field(title="Answering Machine Detection")
+    ] = True
+    allow_opt_out: Annotated[bool | None, Field(title="Allow Opt Out")] = False
 
 
 class Role(Enum):
@@ -457,7 +455,7 @@ class PhoneLine(BaseModel):
     kind: Annotated[Kind, Field(title="Kind")]
 
 
-class Status2(Enum):
+class Status1(Enum):
     confirmed = "confirmed"
     code_sent = "code_sent"
 
@@ -473,7 +471,7 @@ class PhoneNumber(BaseModel):
     """
 
     number: Annotated[str, Field(title="Number")]
-    status: Annotated[Status2, Field(title="Status")]
+    status: Annotated[Status1, Field(title="Status")]
     confirmed_at: Annotated[int | None, Field(title="Confirmed At")] = None
     channel: Annotated[Channel | None, Field(title="Channel")] = None
 
@@ -482,6 +480,7 @@ class PhoneNumberConfirmation(BaseModel):
     number: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Number")]
     code: Annotated[str, Field(pattern="^\\d{6}$", title="Code")]
     name: Annotated[Name | None, Field(title="Name")] = None
+    verification_id: Annotated[UUID | None, Field(title="Verification Id")] = None
 
 
 class PhoneNumberList(BaseModel):
@@ -491,6 +490,26 @@ class PhoneNumberList(BaseModel):
 class PhoneNumberRequest(BaseModel):
     number: Annotated[str, Field(pattern="^\\+[1-9]\\d{6,14}$", title="Number")]
     channel: Annotated[Channel | None, Field(title="Channel")] = Channel.text
+    verification_id: Annotated[UUID | None, Field(title="Verification Id")] = None
+
+
+class PhoneReadiness(BaseModel):
+    ready: Annotated[bool, Field(title="Ready")]
+    dedicated_line: Annotated[bool, Field(title="Dedicated Line")]
+    signed_outcomes: Annotated[bool, Field(title="Signed Outcomes")]
+    durable_operations: Annotated[bool | None, Field(title="Durable Operations")] = True
+    answering_machine_detection: Annotated[
+        bool | None, Field(title="Answering Machine Detection")
+    ] = True
+    ephemeral_recipient_proof: Annotated[
+        bool | None, Field(title="Ephemeral Recipient Proof")
+    ] = True
+    max_duration_seconds: Annotated[int | None, Field(title="Max Duration Seconds")] = (
+        28800
+    )
+    inbound: Annotated[bool | None, Field(title="Inbound")] = False
+    inbound_pin: Annotated[bool | None, Field(title="Inbound Pin")] = False
+    inbound_number: Annotated[str | None, Field(title="Inbound Number")] = None
 
 
 class RealtimeSessionUsageResponse(BaseModel):
@@ -515,12 +534,6 @@ class RealtimeSessionUsageResponse(BaseModel):
     recording_truncated: Annotated[bool | None, Field(title="Recording Truncated")] = (
         False
     )
-
-
-class ScorecardResponse(BaseModel):
-    days: Annotated[int, Field(title="Days")]
-    since: Annotated[AwareDatetime, Field(title="Since")]
-    bundles: Annotated[list[BundleScorecard], Field(title="Bundles")]
 
 
 class SentText(BaseModel):
@@ -620,6 +633,7 @@ class SpeechRequest(BaseModel):
     language: Annotated[str | None, Field(title="Language")] = None
     normalize_text: Annotated[bool | None, Field(title="Normalize Text")] = False
     source: Annotated[Source | None, Field(title="Source")] = None
+    store: Annotated[bool | None, Field(title="Store")] = True
 
 
 class TextRequest(BaseModel):
@@ -665,6 +679,8 @@ class TurnMetricsSummary(BaseModel):
         float | None, Field(title="Eou To First Audio Max Ms")
     ] = None
     histogram: Annotated[list[LatencyBucket] | None, Field(title="Histogram")] = None
+    distribution: Annotated[list[LatencyBin] | None, Field(title="Distribution")] = None
+    daily: Annotated[list[LatencyDay] | None, Field(title="Daily")] = None
     barge_in_count: Annotated[int | None, Field(title="Barge In Count")] = 0
     coverage: TurnMetricsCoverage | None = None
 
@@ -679,6 +695,19 @@ class UsageApiKeyBreakdown(BaseModel):
     calls: Annotated[int, Field(title="Calls")]
     charged_cents: Annotated[float, Field(title="Charged Cents")]
     comped_cents: Annotated[float, Field(title="Comped Cents")]
+    spend_cents: Annotated[float, Field(title="Spend Cents")]
+
+
+class UsageDayBreakdown(BaseModel):
+    """
+    One UTC day of one kind of work: what the window looked like, day by
+    day, from the same ledger rows the totals add up.
+    """
+
+    day: Annotated[str, Field(title="Day")]
+    kind: Annotated[str, Field(title="Kind")]
+    calls: Annotated[int, Field(title="Calls")]
+    quantity: Annotated[float, Field(title="Quantity")]
     spend_cents: Annotated[float, Field(title="Spend Cents")]
 
 
@@ -710,6 +739,18 @@ class UsageModelBreakdown(BaseModel):
     model: Annotated[str, Field(title="Model")]
 
 
+class UsageRate(BaseModel):
+    """
+    The one rate card every row above is priced at: timed audio of every
+    kind by the minute, a cloned voice once. Sent with the breakdown so a row
+    shows the rate it was priced at rather than a per-call average that
+    reads as a different price per kind.
+    """
+
+    price_per_minute_usd: Annotated[float, Field(title="Price Per Minute Usd")]
+    voice_clone_credits: Annotated[int, Field(title="Voice Clone Credits")]
+
+
 class UsageUnattributed(BaseModel):
     """
     Work with no API key behind it — the console, and history predating
@@ -728,6 +769,50 @@ class ValidationError(BaseModel):
     type: Annotated[str, Field(title="Error Type")]
     input: Annotated[Any | None, Field(title="Input")] = None
     ctx: Annotated[dict[str, Any] | None, Field(title="Context")] = None
+
+
+class Text(RootModel[str]):
+    root: Annotated[str, Field(max_length=300, title="Text")]
+    """
+    What the takes read. Omitted, a line in character is written for them.
+    """
+
+
+class Language1(RootModel[str]):
+    root: Annotated[str, Field(max_length=16, title="Language")]
+    """
+    The language of the line, such as `en` or `ar`. Omitted, the description's.
+    """
+
+
+class VoiceDesignRequest(BaseModel):
+    """
+    A voice described in words.
+    """
+
+    description: Annotated[
+        str, Field(max_length=300, min_length=3, title="Description")
+    ]
+    """
+    Who the voice is, in any language: "a calm older man with a deep voice".
+    """
+    text: Annotated[Text | None, Field(title="Text")] = None
+    """
+    What the takes read. Omitted, a line in character is written for them.
+    """
+    language: Annotated[Language1 | None, Field(title="Language")] = None
+    """
+    The language of the line, such as `en` or `ar`. Omitted, the description's.
+    """
+
+
+class VoiceDesignTake(BaseModel):
+    take_id: Annotated[str, Field(title="Take Id")]
+    audio: Annotated[str, Field(title="Audio")]
+    content_type: Annotated[Literal["audio/wav"], Field(title="Content Type")] = (
+        "audio/wav"
+    )
+    seconds: Annotated[float, Field(title="Seconds")]
 
 
 class VoiceIsolation(BaseModel):
@@ -758,7 +843,7 @@ class VoiceIsolationRequest(BaseModel):
     use_isolated: Annotated[bool, Field(title="Use Isolated")]
 
 
-class Status3(Enum):
+class Status2(Enum):
     processing = "processing"
     ready = "ready"
     failed = "failed"
@@ -768,7 +853,7 @@ class VoiceResponse(BaseModel):
     voice_id: Annotated[str, Field(title="Voice Id")]
     name: Annotated[str, Field(title="Name")]
     engine: Annotated[str, Field(title="Engine")]
-    status: Annotated[Status3, Field(title="Status")]
+    status: Annotated[Status2, Field(title="Status")]
     error: Annotated[str | None, Field(title="Error")] = None
     has_ref_text: Annotated[bool, Field(title="Has Ref Text")]
     ref_text: Annotated[str | None, Field(title="Ref Text")] = None
@@ -920,12 +1005,16 @@ class PhoneCall(BaseModel):
 
     id: Annotated[str, Field(title="Id")]
     session_id: Annotated[str, Field(title="Session Id")]
-    status: Annotated[Status1, Field(title="Status")]
+    status: Annotated[Status, Field(title="Status")]
     to: Annotated[str, Field(title="To")]
     created_at: Annotated[int, Field(title="Created At")]
     duration_seconds: Annotated[float | None, Field(title="Duration Seconds")] = None
+    duration_final: Annotated[bool | None, Field(title="Duration Final")] = False
     transcript: Annotated[list[PhoneCallTurn] | None, Field(title="Transcript")] = None
     metadata: Annotated[dict[str, str] | None, Field(title="Metadata")] = None
+    outcome: Annotated[str | None, Field(title="Outcome")] = None
+    answered_by: Annotated[str | None, Field(title="Answered By")] = None
+    opt_out: Annotated[bool | None, Field(title="Opt Out")] = False
 
 
 class UsageBreakdownResponse(BaseModel):
@@ -943,4 +1032,14 @@ class UsageBreakdownResponse(BaseModel):
     by_api_key: Annotated[
         list[UsageApiKeyBreakdown] | None, Field(title="By Api Key")
     ] = None
+    by_day: Annotated[list[UsageDayBreakdown] | None, Field(title="By Day")] = None
     unattributed: UsageUnattributed
+    rate: UsageRate
+
+
+class VoiceDesignResponse(BaseModel):
+    instructions: Annotated[str, Field(title="Instructions")]
+    text: Annotated[str, Field(title="Text")]
+    language: Annotated[str | None, Field(title="Language")]
+    name: Annotated[str, Field(title="Name")]
+    takes: Annotated[list[VoiceDesignTake], Field(title="Takes")]

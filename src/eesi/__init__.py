@@ -22,7 +22,7 @@
         await session.context.update({"location": "The Northern Gate"})
         await session.run()
 
-Everything runs on Nur Live (``nur-live-v1``): one realtime conversation per
+Everything runs on Nur (``nur-v1``): one realtime conversation per
 session, full-duplex, with your character, your tools, your live context and
 your players' memories. The REST client for the rest of the API is
 :class:`EESIClient`, re-exported from ``eesi_sdk``.
@@ -59,6 +59,7 @@ from .errors import (
 )
 from .events import Event
 from .languages import describe as describe_language
+from .mcp import McpServer
 from .memory import (
     ALL_PLAYERS,
     CharacterMemory,
@@ -95,6 +96,7 @@ __all__ = [
     "LiveContext",
     "LocalAudio",
     "LocalMemoryStore",
+    "McpServer",
     "Memory",
     "MemoryPolicy",
     "MemoryRecord",

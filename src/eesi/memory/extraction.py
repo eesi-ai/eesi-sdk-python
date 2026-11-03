@@ -3,7 +3,7 @@
 After a session the SDK can ask a language model what is worth keeping: who
 the player is, what they prefer, what happened, what was promised, how the
 relationship changed, and which old memories a correction replaces. The
-default extractor asks EESI's own text model (``nur-llm-v1`` over
+default extractor asks EESI's own text model (``nur-v1`` over
 ``/v1/chat/completions``) with your API key; pass ``extractor=`` to use your
 own model, or ``MemoryPolicy(extract=False)`` to learn nothing on your behalf.
 

@@ -9,7 +9,7 @@ URL as a WebSocket and is talking to Kael at once: the session already has
 his instructions, voice, tools, the player's memories and the live state you
 passed, and the client cannot replace his instructions or tools.
 
-What the client does on the socket (the Nur Live protocol, docs.eesi.ai/realtime/live):
+What the client does on the socket (the Nur protocol, docs.eesi.ai/realtime/live):
 
 - send microphone audio as ``input_audio_buffer.append`` (16-bit mono PCM,
   16 kHz, base64, about 20 ms per message);

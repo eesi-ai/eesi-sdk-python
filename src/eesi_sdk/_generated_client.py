@@ -25,26 +25,28 @@ from eesi_sdk._generated_models import (
     CurrentUsageResponse,
     DailyUsageBreakdownResponse,
     GenerationListResponse,
-    InteractionFailure,
-    InteractionFailureList,
-    InteractionFailureUpdate,
+    KeepDesignedVoiceRequest,
     ListenerBrief,
     ListenerEvents,
     ListenerState,
     OrganizationTurnMetricsSummaryResponse,
+    PhoneAdmissionConfiguration,
+    PhoneAdmissionStatus,
     PhoneCall,
     PhoneCallRequest,
     PhoneNumber,
     PhoneNumberConfirmation,
     PhoneNumberList,
     PhoneNumberRequest,
-    ScorecardResponse,
+    PhoneReadiness,
     SeparatedClip,
     SpeechModelsResponse,
     SpeechRequest,
     TextRequest,
     UsageBreakdownResponse,
     UsageHistoryResponse,
+    VoiceDesignRequest,
+    VoiceDesignResponse,
     VoiceIsolation,
     VoiceIsolationRequest,
     VoiceResponse,
@@ -72,9 +74,25 @@ class _GeneratedClient:
         """Archive an API key (soft delete)."""
         return self._request("DELETE", f"/user/api-keys/{api_key_id}")
 
+    def cancel_phone_call(self, call_id: str) -> PhoneCall:
+        """Cancel a durable call and fence a delayed dial with the same request ID."""
+        data = self._request("DELETE", f"/phone/calls/{call_id}")
+        return PhoneCall.model_validate(data)
+
     def chat_completions(self, *, body: Mapping[str, Any]) -> Any:
         """Chat completions. `body` is an OpenAI chat-completions request and is forwarded verbatim; the parsed completion is returned. Streaming (`stream: true`) is not supported by this method — use an OpenAI client for that."""
         return self._request("POST", "/chat/completions", json=dict(body))
+
+    def configure_phone_admission(
+        self, *, body: PhoneAdmissionConfiguration | Mapping[str, Any]
+    ) -> PhoneAdmissionStatus:
+        """Configure a signed admission callback for an owned, active inbound number."""
+        data = self._request(
+            "PUT",
+            "/phone/inbound-admission",
+            json=json_body(body, PhoneAdmissionConfiguration),
+        )
+        return PhoneAdmissionStatus.model_validate(data)
 
     def confirm_phone_number(
         self, *, body: PhoneNumberConfirmation | Mapping[str, Any]
@@ -122,6 +140,7 @@ class _GeneratedClient:
         temperature: float | None = None,
         timestamp_granularities: list[Literal["word", "segment"]] | None = None,
         stream: bool | None = None,
+        store: bool | None = None,
     ) -> Any:
         """Create transcription."""
         files: dict[str, FileInput] = {"file": file}
@@ -138,6 +157,8 @@ class _GeneratedClient:
             data["timestamp_granularities[]"] = timestamp_granularities
         if stream is not None:
             data["stream"] = stream
+        if store is not None:
+            data["store"] = store
         return self._request("POST", "/audio/transcriptions", files=files, data=data)
 
     def create_voice(
@@ -147,7 +168,7 @@ class _GeneratedClient:
         name: str,
         consent_attested: bool | None = None,
         ref_text: str | None = None,
-        engine: Literal["nur-tts-v1", "omnivoice"] | None = None,
+        engine: Literal["nur-v1"] | None = None,
         category: Literal[
             "general",
             "conversational",
@@ -194,6 +215,15 @@ class _GeneratedClient:
         data = self._request("DELETE", f"/voices/{voice_id}")
         return VoiceResponse.model_validate(data)
 
+    def design_voice(
+        self, *, body: VoiceDesignRequest | Mapping[str, Any]
+    ) -> VoiceDesignResponse:
+        """Three takes of a voice described in words, to keep one."""
+        data = self._request(
+            "POST", "/voices/design", json=json_body(body, VoiceDesignRequest)
+        )
+        return VoiceDesignResponse.model_validate(data)
+
     def forget_phone_number(self, number: str) -> Any:
         """Stop Nur's calls to a number on the shared line until it is confirmed again."""
         return self._request("DELETE", f"/phone/numbers/{number}")
@@ -236,19 +266,6 @@ class _GeneratedClient:
             "GET", "/organizations/usage/daily-breakdown", params=params
         )
         return DailyUsageBreakdownResponse.model_validate(data)
-
-    def get_failure(self, failure_id: str) -> InteractionFailure:
-        """One interaction failure."""
-        data = self._request("GET", f"/failures/{failure_id}")
-        return InteractionFailure.model_validate(data)
-
-    def get_failure_scorecard(self, *, days: int | None = None) -> ScorecardResponse:
-        """Per runtime bundle: sessions, how they ended, evidence coverage, reply latency and failures — the scorecard a release is judged by."""
-        params: dict[str, Any] = {}
-        if days is not None:
-            params["days"] = days
-        data = self._request("GET", "/failures/scorecard", params=params)
-        return ScorecardResponse.model_validate(data)
 
     def get_organization_turn_metrics_summary(
         self, *, days: int | None = None
@@ -306,32 +323,16 @@ class _GeneratedClient:
         data = self._request("GET", f"/voices/{voice_id}/isolation")
         return VoiceIsolation.model_validate(data)
 
-    def list_failures(
-        self,
-        *,
-        status: str | None = None,
-        signal: str | None = None,
-        severity: str | None = None,
-        session_id: str | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> InteractionFailureList:
-        """Interaction failures raised from this organization's sessions, ranked by severity × confidence."""
-        params: dict[str, Any] = {}
-        if status is not None:
-            params["status"] = status
-        if signal is not None:
-            params["signal"] = signal
-        if severity is not None:
-            params["severity"] = severity
-        if session_id is not None:
-            params["session_id"] = session_id
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
-        data = self._request("GET", "/failures", params=params)
-        return InteractionFailureList.model_validate(data)
+    def keep_designed_voice(
+        self, *, body: KeepDesignedVoiceRequest | Mapping[str, Any]
+    ) -> VoiceResponse:
+        """Make one take of a designed voice a voice of your own."""
+        data = self._request(
+            "POST",
+            "/voices/design/keep",
+            json=json_body(body, KeepDesignedVoiceRequest),
+        )
+        return VoiceResponse.model_validate(data)
 
     def list_generations(
         self,
@@ -377,6 +378,11 @@ class _GeneratedClient:
         data = self._request("GET", "/phone/listener/events", params=params)
         return ListenerEvents.model_validate(data)
 
+    def phone_readiness(self) -> PhoneReadiness:
+        """Check the organization's configured phone capabilities without placing a call."""
+        data = self._request("GET", "/phone/readiness")
+        return PhoneReadiness.model_validate(data)
+
     def publish_phone_listener(
         self, *, body: ListenerBrief | Mapping[str, Any]
     ) -> ListenerState:
@@ -409,17 +415,6 @@ class _GeneratedClient:
             json=json_body(body, VoiceIsolationRequest),
         )
         return VoiceResponse.model_validate(data)
-
-    def update_failure(
-        self, failure_id: str, *, body: InteractionFailureUpdate | Mapping[str, Any]
-    ) -> InteractionFailure:
-        """Move a failure through triage (status) and record what was found (notes)."""
-        data = self._request(
-            "PATCH",
-            f"/failures/{failure_id}",
-            json=json_body(body, InteractionFailureUpdate),
-        )
-        return InteractionFailure.model_validate(data)
 
     def update_voice(
         self, voice_id: str, *, body: VoiceUpdateRequest | Mapping[str, Any]
