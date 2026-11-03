@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "BSD-2-Clause" }
 authors = [
-    { name = "Zansat Technologies Private Limited", email = "contact@eesi.ai" },
+    { name = "EESI Labs Inc.", email = "founders@eesi.ai" },
 ]
 keywords = ["eesi", "voice-ai", "speech", "sdk", "api", "realtime", "npc", "voice-agent", "companion", "speech-to-speech"]
 classifiers = [
